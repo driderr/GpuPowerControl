@@ -37,7 +37,7 @@ namespace GpuThermalController.Nvml
 
             // Get name
             StringBuilder nameBuilder = new StringBuilder(64);
-            result = NVML.nvmlDeviceGetName_v2(handle, nameBuilder, nameBuilder.Capacity);
+            result = NVML.nvmlDeviceGetName(handle, nameBuilder, nameBuilder.Capacity);
             string name = result == 0 ? nameBuilder.ToString() : $"Device {index}";
 
             // Get power constraints
@@ -69,7 +69,7 @@ namespace GpuThermalController.Nvml
             int result = NVML.nvmlDeviceSetPowerManagementLimit(_handle, limitMw);
             if (result != 0)
             {
-                errorMessage = $"NVML nvmlDeviceSetPowerManagementLimit failed (error code: {result})";
+                errorMessage = $"NVML nvmlDeviceSetPowerManagementLimit failed: {NVML.GetErrorMessage(result)}";
                 return false;
             }
 
