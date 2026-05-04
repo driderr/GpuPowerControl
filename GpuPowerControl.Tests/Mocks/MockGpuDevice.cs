@@ -23,6 +23,9 @@ public class MockGpuDevice : IGpuDevice
     public bool SetPowerLimitShouldFail { get; set; }
     public string? FailErrorMessage { get; set; }
 
+    /// <summary>When true, GetTemperature returns false (simulates device read failure).</summary>
+    public bool GetTemperatureShouldFail { get; set; }
+
     public MockGpuDevice(
         string name = "Mock GPU",
         int minPower = 150,
@@ -68,11 +71,20 @@ public class MockGpuDevice : IGpuDevice
         _temperatureProvider = provider;
     }
 
-    public uint GetTemperature()
+    public bool GetTemperature(out uint temperature)
     {
+        if (GetTemperatureShouldFail)
+        {
+            temperature = 0;
+            return false;
+        }
+
         if (_temperatureProvider != null)
-            return _temperatureProvider();
-        return _constantTemperature;
+            temperature = _temperatureProvider();
+        else
+            temperature = _constantTemperature;
+
+        return true;
     }
 
     public bool SetPowerLimit(int watts, out string? errorMessage)
