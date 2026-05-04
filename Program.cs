@@ -1,6 +1,5 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Security.Principal;
 using System.Text;
@@ -50,15 +49,6 @@ namespace GpuThermalController
 
             IntPtr gpuHandle = SelectGpu();
 
-            Console.WriteLine("Enabling Persistence Mode...");
-            SetPowerLimitCommandLine("-pm 1", out string? pmError);
-            if (!string.IsNullOrEmpty(pmError))
-            {
-                Console.ForegroundColor = ConsoleColor.Yellow;
-                Console.WriteLine($"Warning: Could not enable persistence mode: {pmError}");
-                Console.ResetColor();
-            }
-
             Console.ForegroundColor = ConsoleColor.Green;
             Console.WriteLine($"Started Thermal Controller.");
             Console.WriteLine($"Trigger: {TriggerTemp}°C | Target Stability: {TargetTemp}°C | Emergency Limit: {EmergencyTemp}°C | Max Power: {MaxPower}W");
@@ -72,7 +62,7 @@ namespace GpuThermalController
             {
                 e.Cancel = true; // Prevent default termination so cleanup can run
                 Console.WriteLine("\nExiting... Restoring Max Power.");
-                SetPowerLimitCommandLine($"-pl {MaxPower}", out _);
+                SetPowerLimit(gpuHandle, MaxPower, out _);
             };
 
             // MAIN LOOP — wrapped in try/finally to ensure NVML shutdown
@@ -93,7 +83,7 @@ namespace GpuThermalController
                         Console.ForegroundColor = ConsoleColor.Red;
                         Console.WriteLine($"\n[EMERGENCY] Temp hit {currentTemp}°C! Forcing minimum power limit ({MinPower}W).");
                         Console.ResetColor();
-                        SetPowerLimitCommandLine($"-pl {MinPower}", out string? emError);
+                        SetPowerLimit(gpuHandle, MinPower, out string? emError);
                         if (!string.IsNullOrEmpty(emError))
                         {
                             Console.ForegroundColor = ConsoleColor.Red;
@@ -154,7 +144,7 @@ namespace GpuThermalController
                     // Apply if changed
                     if (newPower != currentPowerLimit)
                     {
-                        bool success = SetPowerLimitCommandLine($"-pl {newPower}", out string? plError);
+                        bool success = SetPowerLimit(gpuHandle, newPower, out string? plError);
                         if (success)
                         {
                             currentPowerLimit = newPower;
@@ -317,40 +307,19 @@ namespace GpuThermalController
             }
         }
 
-        static bool SetPowerLimitCommandLine(string arguments, out string? errorMessage)
+        static bool SetPowerLimit(IntPtr gpuHandle, int watts, out string? errorMessage)
         {
             errorMessage = null;
+            uint limitMw = (uint)(watts * 1000); // NVML expects milliwatts
 
-            try
+            int result = NVML.nvmlDeviceSetPowerManagementLimit(gpuHandle, limitMw);
+            if (result != 0)
             {
-                using (Process process = new Process())
-                {
-                    process.StartInfo.FileName = "nvidia-smi";
-                    process.StartInfo.Arguments = arguments;
-                    process.StartInfo.UseShellExecute = false;
-                    process.StartInfo.CreateNoWindow = true;
-                    process.StartInfo.RedirectStandardError = true;
-
-                    process.Start();
-                    string? errorOutput = process.StandardError.ReadToEnd();
-                    process.WaitForExit();
-
-                    if (process.ExitCode != 0 || !string.IsNullOrEmpty(errorOutput))
-                    {
-                        errorMessage = string.IsNullOrEmpty(errorOutput)
-                            ? $"nvidia-smi exited with code {process.ExitCode}"
-                            : errorOutput.Trim();
-                        return false;
-                    }
-
-                    return true;
-                }
-            }
-            catch (Exception ex)
-            {
-                errorMessage = ex.Message;
+                errorMessage = $"NVML nvmlDeviceSetPowerManagementLimit failed (error code: {result})";
                 return false;
             }
+
+            return true;
         }
 
         static bool IsAdministrator()
@@ -383,5 +352,16 @@ namespace GpuThermalController
 
         [DllImport("nvml.dll", CallingConvention = CallingConvention.Cdecl)]
         public static extern int nvmlDeviceGetName_v2(IntPtr device, [Out] StringBuilder name, int length);
+
+        [DllImport("nvml.dll", CallingConvention = CallingConvention.Cdecl)]
+        public static extern int nvmlDeviceSetPowerManagementLimit(IntPtr device, uint limitMw);
+
+        [DllImport("nvml.dll", CallingConvention = CallingConvention.Cdecl)]
+        public static extern int nvmlDeviceGetPowerManagementLimitConstraints(
+            IntPtr device, out uint minLimitMw, out uint maxLimitMw);
+
+        [DllImport("nvml.dll", CallingConvention = CallingConvention.Cdecl)]
+        public static extern int nvmlDeviceGetPowerManagementDefaultLimit(
+            IntPtr device, out uint defaultLimitMw);
     }
 }
