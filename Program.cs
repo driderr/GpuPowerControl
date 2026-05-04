@@ -27,7 +27,8 @@ namespace GpuThermalController
         static double integral = 0;
         static int currentPowerLimit = MaxPower;
         static bool isControlling = false;
-        static uint lastKnownGoodTemp = 0; // Cache last successful temperature reading
+        static uint lastKnownGoodTemp = TargetTemp; // Cache last successful temperature reading; default to TargetTemp so a first-read failure doesn't result in 0°C
+        static int consecutiveReadFailures = 0; // Tracks consecutive NVML temperature read failures for fail-safe behavior
 
         static void Main(string[] args)
         {
@@ -115,6 +116,7 @@ namespace GpuThermalController
                         if (safetyTrigger || predictiveTrigger)
                         {
                             isControlling = true;
+                            integral = 0; // Reset integral to prevent initial over-correction spike
                             Console.ForegroundColor = ConsoleColor.Magenta;
                             if (predictiveTrigger && !safetyTrigger)
                                 Console.WriteLine($"\n[PREDICTIVE TRIGGER] Temp {currentTemp}°C rising at {derivative:F1}°C/s. Engaging early.");
@@ -127,74 +129,60 @@ namespace GpuThermalController
                     // 2. PID CONTROL EXECUTION
                     if (isControlling)
                     {
-                        // Error is calculated against the Target (75), NOT the Trigger (80)
-                        double error = currentTemp - TargetTemp;
+                    // Error is calculated against the Target (75), NOT the Trigger (80)
+                    double error = currentTemp - TargetTemp;
 
-                        double P = Kp * error;
+                    double P = Kp * error;
 
-                        integral += (error * dt);
-                        // Anti-windup: Prevent the integral from accumulating too much extreme correction
-                        if (integral > 250) integral = 250;
-                        if (integral < -50) integral = -50;
-                        double I = Ki * integral;
+                    integral += (error * dt);
+                    // Anti-windup: Prevent the integral from accumulating too much extreme correction
+                    if (integral > 250) integral = 250;
+                    if (integral < -50) integral = -50;
+                    double I = Ki * integral;
 
-                        // Only apply derivative if temp is rising (we don't want to over-correct while cooling down)
-                        double D = (derivative > 0) ? (Kd * derivative) : 0;
+                    // Only apply derivative if temp is rising (we don't want to over-correct while cooling down)
+                    double D = (derivative > 0) ? (Kd * derivative) : 0;
 
-                        // Calculate total power reduction needed
-                        double powerReduction = P + I + D;
-                        int newPower = (int)Math.Floor(MaxPower - powerReduction);
+                    // Calculate total power reduction needed
+                    double powerReduction = P + I + D;
+                    int newPower = (int)Math.Floor(MaxPower - powerReduction);
 
-                        // Clamp to hardware limits
-                        if (newPower > MaxPower) newPower = MaxPower;
-                        if (newPower < MinPower) newPower = MinPower;
+                    // Clamp to hardware limits
+                    if (newPower > MaxPower) newPower = MaxPower;
+                    if (newPower < MinPower) newPower = MinPower;
 
-                        // Apply if changed
-                        if (newPower != currentPowerLimit)
+                    // Apply if changed
+                    if (newPower != currentPowerLimit)
+                    {
+                        bool success = SetPowerLimitCommandLine($"-pl {newPower}", out string? plError);
+                        if (success)
                         {
-                            bool success = SetPowerLimitCommandLine($"-pl {newPower}", out string? plError);
-                            if (success)
-                            {
-                                currentPowerLimit = newPower;
+                            currentPowerLimit = newPower;
 
-                                ConsoleColor color = currentTemp >= TargetTemp ? ConsoleColor.Yellow : ConsoleColor.Cyan;
-                                Console.ForegroundColor = color;
-                                Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] Temp: {currentTemp}°C | Target: {TargetTemp}°C | Limiting Power to: {newPower}W");
-                                Console.ResetColor();
-                            }
-                            else
-                            {
-                                Console.ForegroundColor = ConsoleColor.Yellow;
-                                Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] Warning: Failed to set power limit to {newPower}W: {plError}");
-                                Console.ResetColor();
-                            }
-
-                            // Exit condition: If we are fully cooled below target AND power is fully restored to max
-                            if (currentTemp <= TargetTemp - 2 && currentPowerLimit == MaxPower)
-                            {
-                                isControlling = false;
-                                integral = 0; // Reset integral state
-                                Console.ForegroundColor = ConsoleColor.Green;
-                                Console.WriteLine($"\n[STABLE] Temp settled at {currentTemp}°C. Full power restored. Returning to idle monitoring.");
-                                Console.ResetColor();
-                            }
-
-                            Thread.Sleep(250); // Fast loop when controlling
+                            ConsoleColor color = currentTemp >= TargetTemp ? ConsoleColor.Yellow : ConsoleColor.Cyan;
+                            Console.ForegroundColor = color;
+                            Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] Temp: {currentTemp}°C | Target: {TargetTemp}°C | Limiting Power to: {newPower}W");
+                            Console.ResetColor();
                         }
                         else
                         {
-                            // Power value hasn't changed — check exit condition even without actuation
-                            if (currentTemp <= TargetTemp - 2 && currentPowerLimit == MaxPower)
-                            {
-                                isControlling = false;
-                                integral = 0; // Reset integral state
-                                Console.ForegroundColor = ConsoleColor.Green;
-                                Console.WriteLine($"\n[STABLE] Temp settled at {currentTemp}°C. Full power restored. Returning to idle monitoring.");
-                                Console.ResetColor();
-                            }
-
-                            Thread.Sleep(250); // Fast loop when controlling
+                            Console.ForegroundColor = ConsoleColor.Yellow;
+                            Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] Warning: Failed to set power limit to {newPower}W: {plError}");
+                            Console.ResetColor();
                         }
+                    }
+
+                    // Exit condition: Check regardless of whether the nvidia-smi call succeeded
+                    if (currentTemp <= TargetTemp - 2 && currentPowerLimit == MaxPower)
+                    {
+                        isControlling = false;
+                        integral = 0; // Reset integral state
+                        Console.ForegroundColor = ConsoleColor.Green;
+                        Console.WriteLine($"\n[STABLE] Temp settled at {currentTemp}°C. Full power restored. Returning to idle monitoring.");
+                        Console.ResetColor();
+                    }
+
+                    Thread.Sleep(250); // Fast loop when controlling
                     }
                     else
                     {
@@ -306,13 +294,25 @@ namespace GpuThermalController
             if (result == 0)
             {
                 lastKnownGoodTemp = temp;
+                consecutiveReadFailures = 0; // Reset failure counter on successful read
                 return temp;
             }
             else
             {
+                consecutiveReadFailures++;
                 Console.ForegroundColor = ConsoleColor.Yellow;
-                Console.WriteLine($"Warning: Failed to read GPU temperature (NVML error: {result}). Using last known temperature: {lastKnownGoodTemp}°C");
+                Console.WriteLine($"Warning: Failed to read GPU temperature (NVML error: {result}). Using last known temperature: {lastKnownGoodTemp}°C (consecutive failures: {consecutiveReadFailures})");
                 Console.ResetColor();
+
+                // Fail-safe: after 5 consecutive read failures, return EmergencyTemp to trigger emergency minimum power
+                if (consecutiveReadFailures >= 5)
+                {
+                    Console.ForegroundColor = ConsoleColor.Red;
+                    Console.WriteLine($"[FAILSAFE] {consecutiveReadFailures} consecutive temperature read failures. Assuming worst-case and returning EmergencyTemp.");
+                    Console.ResetColor();
+                    return EmergencyTemp;
+                }
+
                 return lastKnownGoodTemp;
             }
         }
