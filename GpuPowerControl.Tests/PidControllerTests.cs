@@ -6,14 +6,24 @@ namespace GpuThermalController.Tests;
 public class PidControllerTests
 {
     private PidController CreateController(
-        double kp = 8.0,
-        double ki = 0.5,
-        double kd = 2.5,
-        uint targetTemp = 75,
-        int maxPower = 600,
-        int minPower = 150)
+        double? kp = null,
+        double? ki = null,
+        double? kd = null,
+        uint? targetTemp = null,
+        int? maxPower = null,
+        int? minPower = null)
     {
-        return new PidController(kp, ki, kd, targetTemp, maxPower, minPower);
+        var config = new ThermalControllerConfig();
+        return new PidController(
+            kp ?? config.Kp,
+            ki ?? config.Ki,
+            kd ?? config.Kd,
+            targetTemp ?? config.TargetTemp,
+            maxPower ?? config.DefaultMaxPower,
+            minPower ?? config.DefaultMinPower,
+            config.IntegralMax,
+            config.IntegralMin,
+            config.MinimumDt);
     }
 
     // --- Proportional Term Tests ---

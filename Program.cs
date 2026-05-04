@@ -40,7 +40,8 @@ namespace GpuThermalController
 
             var pidController = new PidController(
                 config.Kp, config.Ki, config.Kd,
-                config.TargetTemp, device.MaxPower, device.MinPower);
+                config.TargetTemp, device.MaxPower, device.MinPower,
+                config.IntegralMax, config.IntegralMin, config.MinimumDt);
 
             var triggerEvaluator = new TriggerEvaluator(
                 config.TriggerTemp, config.PredictiveFloor, config.LookaheadSeconds);
