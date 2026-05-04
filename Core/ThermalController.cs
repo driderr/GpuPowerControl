@@ -70,10 +70,11 @@ namespace GpuThermalController.Core
         /// </summary>
         /// <param name="simulatedTemp">Optional simulated temperature (for testing). If not provided, reads from device.</param>
         /// <param name="dt">Time delta in seconds since last step (for testing). Default 0.25s.</param>
-        public void Step(double? simulatedTemp = null, double dt = 0.25)
+        public void Step(double? simulatedTemp = null, double dt = -1)
         {
-            // Guard dt before using it in any calculation
-            if (dt <= 0) dt = 0.001;
+            // Use config default when caller doesn't specify dt
+            if (dt < 0) dt = _config.DefaultDt;
+            if (dt <= 0) dt = _config.MinimumDt;
 
             uint currentTemp = simulatedTemp.HasValue
                 ? (uint)Math.Round(simulatedTemp.Value)
@@ -125,7 +126,7 @@ namespace GpuThermalController.Core
                 }
 
                 // Exit condition: temp sufficiently below target AND power fully restored
-                if (currentTemp <= _config.TargetTemp - 2 && _currentPowerLimit >= _device.MaxPower)
+                if (currentTemp <= _config.TargetTemp - _config.ExitHysteresis && _currentPowerLimit >= _device.MaxPower)
                 {
                     _isControlling = false;
                     _pidController.Reset();

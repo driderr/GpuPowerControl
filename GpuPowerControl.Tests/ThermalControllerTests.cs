@@ -7,12 +7,15 @@ namespace GpuPowerControl.Tests;
 public class ThermalControllerTests
 {
     private (ThermalController controller, MockGpuDevice device, List<ThermalControllerEventArgs> events) CreateController(
-        int minPower = 150,
-        int maxPower = 600)
+        int? minPower = null,
+        int? maxPower = null)
     {
-        var device = new MockGpuDevice(minPower: minPower, maxPower: maxPower);
         var config = new ThermalControllerConfig();
-        var pid = new PidController(config.Kp, config.Ki, config.Kd, config.TargetTemp, maxPower, minPower);
+        int mp = minPower ?? config.DefaultMinPower;
+        int mxp = maxPower ?? config.DefaultMaxPower;
+        var device = new MockGpuDevice(minPower: mp, maxPower: mxp);
+        var pid = new PidController(config.Kp, config.Ki, config.Kd, config.TargetTemp, mxp, mp,
+            config.IntegralMax, config.IntegralMin, config.MinimumDt);
         var trigger = new TriggerEvaluator(config.TriggerTemp, config.PredictiveFloor, config.LookaheadSeconds);
         var controller = new ThermalController(device, pid, trigger, config);
 
@@ -134,7 +137,8 @@ public class ThermalControllerTests
     {
         var (controller, device, events) = CreateController();
 
-        controller.Step(94);
+        // 85 is above TriggerTemp (80) but below EmergencyTemp (90)
+        controller.Step(85);
 
         // Should trigger safety but not emergency
         Assert.True(controller.IsControlling);
@@ -153,8 +157,8 @@ public class ThermalControllerTests
         controller.Step(62);
         Assert.False(controller.IsControlling);
 
-        // Spike to emergency
-        controller.Step(90);
+        // Spike above trigger but below emergency
+        controller.Step(85);
         Assert.True(controller.IsControlling);
 
         // Recovery
