@@ -54,11 +54,11 @@ namespace GpuThermalController.Nvml
             return new NvmlGpuDevice(index, handle, name, minPower, maxPower);
         }
 
-        public uint GetTemperature()
+        public bool GetTemperature(out uint temperature)
         {
-            uint temp = 0;
-            NVML.nvmlDeviceGetTemperature(_handle, 0, out temp); // 0 = NVML_TEMPERATURE_GPU
-            return temp;
+            temperature = 0;
+            int result = NVML.nvmlDeviceGetTemperature(_handle, 0, out temperature); // 0 = NVML_TEMPERATURE_GPU
+            return result == 0;
         }
 
         public bool SetPowerLimit(int watts, out string? errorMessage)

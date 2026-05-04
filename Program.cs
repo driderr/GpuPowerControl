@@ -1,8 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Security.Principal;
-using System.Text;
-using System.Threading;
 using GpuThermalController.Core;
 using GpuThermalController.Interfaces;
 using GpuThermalController.Nvml;
@@ -53,37 +51,19 @@ namespace GpuThermalController
             {
                 if (e.Message == null) return;
 
-                if (e.Message.Contains("EMERGENCY"))
+                Console.ForegroundColor = e.EventType switch
                 {
-                    Console.ForegroundColor = ConsoleColor.Red;
-                    Console.WriteLine($"\n{e.Message}");
-                    Console.ResetColor();
-                }
-                else if (e.Message.Contains("STABLE"))
-                {
-                    Console.ForegroundColor = ConsoleColor.Green;
-                    Console.WriteLine($"\n{e.Message}");
-                    Console.ResetColor();
-                }
-                else if (e.Message.Contains("TRIGGER"))
-                {
-                    Console.ForegroundColor = ConsoleColor.Magenta;
-                    Console.WriteLine($"\n{e.Message}");
-                    Console.ResetColor();
-                }
-                else if (e.Message.Contains("Warning"))
-                {
-                    Console.ForegroundColor = ConsoleColor.Yellow;
-                    Console.WriteLine($"{e.Message}");
-                    Console.ResetColor();
-                }
-                else
-                {
-                    ConsoleColor color = e.Temperature >= config.TargetTemp ? ConsoleColor.Yellow : ConsoleColor.Cyan;
-                    Console.ForegroundColor = color;
-                    Console.WriteLine($"{e.Message}");
-                    Console.ResetColor();
-                }
+                    ControllerEventType.Emergency => ConsoleColor.Red,
+                    ControllerEventType.Stable    => ConsoleColor.Green,
+                    ControllerEventType.Trigger   => ConsoleColor.Magenta,
+                    ControllerEventType.Warning   => ConsoleColor.Yellow,
+                    _ => e.Temperature >= config.TargetTemp ? ConsoleColor.Yellow : ConsoleColor.Cyan
+                };
+
+                bool isNewLine = e.EventType is ControllerEventType.Emergency or ControllerEventType.Stable or ControllerEventType.Trigger;
+                Console.Write(isNewLine ? "\n" : "");
+                Console.WriteLine(e.Message);
+                Console.ResetColor();
             };
 
             // Setup graceful exit
