@@ -25,7 +25,7 @@ namespace GpuThermalController
             int nvmlResult = NVML.nvmlInit_v2();
             if (nvmlResult != 0)
             {
-                Console.WriteLine($"Failed to initialize NVML (error code: {nvmlResult}). Ensure NVIDIA drivers are installed.");
+                Console.WriteLine($"Failed to initialize NVML: {NVML.GetErrorMessage(nvmlResult)}. Ensure NVIDIA drivers are installed.");
                 return;
             }
 
@@ -111,7 +111,7 @@ namespace GpuThermalController
             int result = NVML.nvmlDeviceGetCount_v2(out deviceCount);
             if (result != 0)
             {
-                Console.WriteLine($"Failed to get GPU device count (error code: {result}).");
+                Console.WriteLine($"Failed to get GPU device count: {NVML.GetErrorMessage(result)}.");
                 NVML.nvmlShutdown();
                 Environment.Exit(1);
             }
