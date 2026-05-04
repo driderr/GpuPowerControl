@@ -6,9 +6,9 @@ namespace GpuPowerControl.Tests;
 public class TriggerEvaluatorTests
 {
     private TriggerEvaluator CreateEvaluator(
-        uint? triggerTemp = null,
-        double? predictiveFloor = null,
-        double? lookaheadSeconds = null)
+        uint? triggerTemp = default,
+        double? predictiveFloor = default,
+        double? lookaheadSeconds = default)
     {
         var config = new ThermalControllerConfig();
         return new TriggerEvaluator(
