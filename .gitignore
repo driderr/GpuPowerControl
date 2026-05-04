@@ -29,3 +29,6 @@ _*Rd_*
 
 ## Visual Studio Cache
 .vs/
+
+## Generated diagrams (from .mmd sources)
+*.svg
