@@ -13,23 +13,98 @@ namespace GpuThermalController
     {
         static void Main(string[] args)
         {
-            if (!IsAdministrator())
+            // Parse command-line arguments
+            bool simulateMode = false;
+            string? scenarioArg = null;
+            int? baseTempArg = null;
+            int? peakTempArg = null;
+            int? seedArg = null;
+
+            for (int i = 0; i < args.Length; i++)
             {
-                Console.ForegroundColor = ConsoleColor.Red;
-                Console.WriteLine("ERROR: This application must be run as Administrator to set power limits.");
+                switch (args[i].ToLowerInvariant())
+                {
+                    case "--simulate":
+                        simulateMode = true;
+                        break;
+                    case "--scenario":
+                        if (i + 1 < args.Length) scenarioArg = args[i + 1];
+                        break;
+                    case "--base-temp":
+                        if (i + 1 < args.Length && int.TryParse(args[i + 1], out int baseTemp)) baseTempArg = baseTemp;
+                        break;
+                    case "--peak-temp":
+                        if (i + 1 < args.Length) if (int.TryParse(args[i + 1], out int pt)) peakTempArg = pt;
+                        break;
+                    case "--seed":
+                        if (i + 1 < args.Length) if (int.TryParse(args[i + 1], out int sd)) seedArg = sd;
+                        break;
+                }
+            }
+
+            IGpuDevice device;
+            bool nvmlInitialized = false;
+
+            if (simulateMode)
+            {
+                // === SIMULATION MODE ===
+                Console.ForegroundColor = ConsoleColor.Yellow;
+                Console.WriteLine("==========================================================");
+                Console.WriteLine("*** SIMULATION MODE - No real GPU affected ***");
+                Console.WriteLine("==========================================================");
                 Console.ResetColor();
-                return;
-            }
 
-            Console.WriteLine("Initializing NVIDIA Management Library (NVML)...");
-            int nvmlResult = NVML.nvmlInit_v2();
-            if (nvmlResult != 0)
+                // Build simulation config
+                var simConfig = new SimulatedGpuConfig();
+
+                if (scenarioArg != null)
+                {
+                    if (Enum.TryParse<SimulationScenario>(scenarioArg, true, out var scenario))
+                        simConfig.Scenario = scenario;
+                    else
+                    {
+                        Console.ForegroundColor = ConsoleColor.Red;
+                        Console.WriteLine($"Invalid scenario: {scenarioArg}. Valid: Default, Idle, Spike, SustainedLoad, Emergency, GradualWarmup");
+                        Console.ResetColor();
+                        return;
+                    }
+                }
+
+                simConfig.BaseTemp = baseTempArg;
+                simConfig.PeakTemp = peakTempArg;
+                simConfig.Seed = seedArg;
+
+                device = new SimulatedGpuDevice(simConfig);
+
+                Console.ForegroundColor = ConsoleColor.Cyan;
+                Console.WriteLine($"Scenario: {simConfig.Scenario}");
+                if (baseTempArg.HasValue) Console.WriteLine($"Base Temp: {baseTempArg}C");
+                if (peakTempArg.HasValue) Console.WriteLine($"Peak Temp: {peakTempArg}C");
+                if (seedArg.HasValue) Console.WriteLine($"Random Seed: {seedArg}");
+                Console.ResetColor();
+            }
+            else
             {
-                Console.WriteLine($"Failed to initialize NVML: {NVML.GetErrorMessage(nvmlResult)}. Ensure NVIDIA drivers are installed.");
-                return;
-            }
+                // === REAL GPU MODE ===
+                if (!IsAdministrator())
+                {
+                    Console.ForegroundColor = ConsoleColor.Red;
+                    Console.WriteLine("ERROR: This application must be run as Administrator to set power limits.");
+                    Console.ResetColor();
+                    return;
+                }
 
-            IGpuDevice device = SelectGpu();
+                Console.WriteLine("Initializing NVIDIA Management Library (NVML)...");
+                int nvmlResult = NVML.nvmlInit_v2();
+                if (nvmlResult != 0)
+                {
+                    Console.WriteLine($"Failed to initialize NVML: {NVML.GetErrorMessage(nvmlResult)}. Ensure NVIDIA drivers are installed.");
+                    return;
+                }
+                nvmlInitialized = true;
+
+                device = SelectGpu();
+            }
 
             var config = new ThermalControllerConfig();
 
@@ -137,8 +212,11 @@ namespace GpuThermalController
                 jsonPublisher.Dispose();
                 dataProvider.Dispose();
 
-                Console.WriteLine("\nShutting down NVML...");
-                NVML.nvmlShutdown();
+                if (nvmlInitialized)
+                {
+                    Console.WriteLine("\nShutting down NVML...");
+                    NVML.nvmlShutdown();
+                }
             }
         }
 
