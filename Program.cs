@@ -163,19 +163,23 @@ namespace GpuThermalController
                 dashboard.SetJsonStatus(jsonPublisher.IsEnabled);
             };
 
+            // P4: CSV export on background thread to avoid blocking the key handler thread
             keyHandler.ExportCsvRequested += () =>
             {
                 var events = dataProvider.GetEvents(500);
-                try
+                Task.Run(() =>
                 {
-                    var timestamp = DateTime.UtcNow.ToString("yyyyMMdd-HHmmss-fff");
-                    var filePath = $"data/export-{timestamp}.csv";
-                    CsvExporter.ExportToCsv(events, filePath);
-                }
-                catch
-                {
-                    // Silently ignore export errors
-                }
+                    try
+                    {
+                        var timestamp = DateTime.UtcNow.ToString("yyyyMMdd-HHmmss-fff");
+                        var filePath = $"data/export-{timestamp}.csv";
+                        CsvExporter.ExportToCsv(events, filePath);
+                    }
+                    catch
+                    {
+                        // Silently ignore export errors
+                    }
+                });
             };
 
             keyHandler.ToggleConfigRequested += () =>
