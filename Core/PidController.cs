@@ -1,6 +1,12 @@
 namespace GpuThermalController.Core
 {
     /// <summary>
+    /// Captures the individual P, I, D contributions from the last PID calculation.
+    /// Used by the dashboard for displaying PID breakdown.
+    /// </summary>
+    public record PidComponents(double P, double I, double D, double Error, double Derivative);
+
+    /// <summary>
     /// Pure PID controller for thermal management.
     /// Contains no NVML calls, no side effects, and no I/O.
     /// Fully deterministic given the same inputs.
@@ -19,6 +25,9 @@ namespace GpuThermalController.Core
 
         /// <summary>Current accumulated integral value (exposed for testing and state management).</summary>
         public double Integral { get; private set; }
+
+        /// <summary>Individual P, I, D contributions from the last calculation. Null if no calculation has occurred.</summary>
+        public PidComponents? LastComponents { get; private set; }
 
         public PidController(
             double kp,
@@ -70,6 +79,9 @@ namespace GpuThermalController.Core
             double derivative = (currentTemp - lastTemp) / dt;
             double D = (derivative > 0) ? (_kd * derivative) : 0;
 
+            // Store components for dashboard
+            LastComponents = new PidComponents(P, I, D, error, derivative);
+
             // Calculate total power reduction
             double powerReduction = P + I + D;
             int newPower = (int)Math.Floor(_maxPower - powerReduction);
@@ -87,6 +99,7 @@ namespace GpuThermalController.Core
         public void Reset()
         {
             Integral = 0;
+            LastComponents = null;
         }
     }
 }
