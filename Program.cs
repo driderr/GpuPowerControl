@@ -39,6 +39,10 @@ namespace GpuThermalController
                     case "--seed":
                         if (i + 1 < args.Length) if (int.TryParse(args[i + 1], out int sd)) seedArg = sd;
                         break;
+                    case "--test-error":
+                        ErrorConsole.Error("This is a test error message");
+                        ErrorConsole.Warning("This is a test warning message");
+                        return;
                 }
             }
 
@@ -185,6 +189,13 @@ namespace GpuThermalController
             keyHandler.ToggleConfigRequested += () =>
             {
                 dashboard.ToggleConfig();
+            };
+
+            // Test error output (press T during dashboard to verify ErrorConsole works)
+            keyHandler.TestErrorRequested += () =>
+            {
+                ErrorConsole.Error("Test error triggered (press T during runtime)");
+                ErrorConsole.Warning("Test warning triggered (press T during runtime)");
             };
 
             // Setup graceful exit

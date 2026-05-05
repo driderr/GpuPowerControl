@@ -215,7 +215,7 @@ public class ConsoleDashboard : IDisposable
 
         // === FOOTER ===
         renderables.Add(new Text("\n"));
-        renderables.Add(new Markup("[gray]Q:Quit  L:Toggle Log  J:Toggle JSON  E:Export CSV  H:Toggle Config[/]"));
+        renderables.Add(new Markup("[gray]Q:Quit  L:Toggle Log  J:Toggle JSON  E:Export CSV  H:Toggle Config  T:Test Error[/]"));
 
         return renderables;
     }
