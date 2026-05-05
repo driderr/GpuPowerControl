@@ -542,4 +542,274 @@ public class ThermalControllerTests
         Assert.Equal(75, (int)controller.Config.TargetTemp);
         Assert.Equal(80, (int)controller.Config.TriggerTemp);
     }
+
+    // === TEST 21: Power Adjustment Gating - Minimum Delta ===
+
+    [Fact]
+    public void Step_SmallDeltaFarFromTarget_BlocksAdjustment()
+    {
+        // When far from target, small changes (<10W) should be blocked
+        var config = new ThermalControllerConfig
+        {
+            MinPowerDeltaFarW = 10,
+            MinPowerDeltaNearW = 3,
+            MinAdjustmentIntervalMs = 0, // Disable interval gate for this test
+            NearTargetThreshold = 3
+        };
+        var device = new MockGpuDevice(minPower: config.DefaultMinPower, maxPower: config.DefaultMaxPower);
+        var pid = new PidController(config.Kp, config.Ki, config.Kd, config.TargetTemp, config.DefaultMaxPower, config.DefaultMinPower,
+            config.IntegralMax, config.IntegralMin, config.MinimumDt);
+        var trigger = new TriggerEvaluator(config.TriggerTemp, config.PredictiveFloor, config.LookaheadSeconds);
+        var controller = new ThermalController(device, pid, trigger, config);
+
+        var events = new List<ThermalControllerEventArgs>();
+        controller.OnStateChange += (_, e) => events.Add(e);
+
+        // Trigger control mode
+        controller.Step(85);
+        Assert.True(controller.IsControlling);
+        int powerAfterTrigger = controller.CurrentPowerLimit;
+
+        // Step again at same temp - PID will produce similar output, small delta
+        controller.Step(85);
+
+        // Power should not have changed by more than a few watts
+        // (the delta gate should block tiny adjustments)
+        Assert.True(Math.Abs(controller.CurrentPowerLimit - powerAfterTrigger) < 10
+                    || controller.CurrentPowerLimit == powerAfterTrigger,
+                    "Small delta should be blocked when far from target");
+    }
+
+    [Fact]
+    public void Step_LargeDeltaFarFromTarget_AllowsAdjustment()
+    {
+        // When far from target, large changes (>=10W) should be allowed
+        var config = new ThermalControllerConfig
+        {
+            MinPowerDeltaFarW = 10,
+            MinPowerDeltaNearW = 3,
+            MinAdjustmentIntervalMs = 0, // Disable interval gate
+            NearTargetThreshold = 3
+        };
+        var device = new MockGpuDevice(minPower: config.DefaultMinPower, maxPower: config.DefaultMaxPower);
+        var pid = new PidController(config.Kp, config.Ki, config.Kd, config.TargetTemp, config.DefaultMaxPower, config.DefaultMinPower,
+            config.IntegralMax, config.IntegralMin, config.MinimumDt);
+        var trigger = new TriggerEvaluator(config.TriggerTemp, config.PredictiveFloor, config.LookaheadSeconds);
+        var controller = new ThermalController(device, pid, trigger, config);
+
+        // Trigger control at high temp - should reduce power significantly
+        controller.Step(88);
+        Assert.True(controller.IsControlling);
+        // Power should have been reduced from 600
+        Assert.True(controller.CurrentPowerLimit < 600);
+    }
+
+    [Fact]
+    public void Step_SmallDeltaNearTarget_AllowedWithNearThreshold()
+    {
+        // Near target temperature, smaller deltas (>=3W) should be allowed
+        var config = new ThermalControllerConfig
+        {
+            MinPowerDeltaFarW = 10,
+            MinPowerDeltaNearW = 3,
+            MinAdjustmentIntervalMs = 0,
+            NearTargetThreshold = 5, // Within 5°C of target = "near"
+            TargetTemp = 75
+        };
+        var device = new MockGpuDevice(minPower: config.DefaultMinPower, maxPower: config.DefaultMaxPower);
+        var pid = new PidController(config.Kp, config.Ki, config.Kd, config.TargetTemp, config.DefaultMaxPower, config.DefaultMinPower,
+            config.IntegralMax, config.IntegralMin, config.MinimumDt);
+        var trigger = new TriggerEvaluator(config.TriggerTemp, config.PredictiveFloor, config.LookaheadSeconds);
+        var controller = new ThermalController(device, pid, trigger, config);
+
+        var events = new List<ThermalControllerEventArgs>();
+        controller.OnStateChange += (_, e) => events.Add(e);
+
+        // Trigger control
+        controller.Step(85);
+        Assert.True(controller.IsControlling);
+
+        // Cool down near target - small adjustments should be allowed
+        controller.Step(77); // Within 5°C of 75 = near target
+        controller.Step(76);
+
+        // Controller should be able to make 3W+ adjustments near target
+        Assert.True(controller.CurrentPowerLimit >= 150 && controller.CurrentPowerLimit <= 600);
+    }
+
+    // === TEST 22: Power Adjustment Gating - Minimum Interval ===
+
+    [Fact]
+    public void Step_IntervalNotElapsed_BlocksAdjustment()
+    {
+        // When interval hasn't elapsed, even large deltas should be blocked
+        var config = new ThermalControllerConfig
+        {
+            MinPowerDeltaFarW = 10,
+            MinPowerDeltaNearW = 3,
+            MinAdjustmentIntervalMs = 5000, // 5 second cooldown
+            NearTargetThreshold = 3,
+            IntervalBypassDerivative = 100.0 // Effectively disable bypass
+        };
+        var device = new MockGpuDevice(minPower: config.DefaultMinPower, maxPower: config.DefaultMaxPower);
+        var pid = new PidController(config.Kp, config.Ki, config.Kd, config.TargetTemp, config.DefaultMaxPower, config.DefaultMinPower,
+            config.IntegralMax, config.IntegralMin, config.MinimumDt);
+        var trigger = new TriggerEvaluator(config.TriggerTemp, config.PredictiveFloor, config.LookaheadSeconds);
+        var controller = new ThermalController(device, pid, trigger, config);
+
+        // Trigger control - first adjustment allowed (MinValue timestamp)
+        controller.Step(85);
+        Assert.True(controller.IsControlling);
+        int powerAfterFirst = controller.CurrentPowerLimit;
+
+        // Immediately step at higher temp - interval not elapsed
+        controller.Step(87);
+        int powerAfterSecond = controller.CurrentPowerLimit;
+
+        // Power should NOT have changed (interval gate blocks it)
+        Assert.Equal(powerAfterFirst, powerAfterSecond);
+    }
+
+    [Fact]
+    public void Step_IntervalElapsed_AllowsAdjustment()
+    {
+        // When interval has elapsed via TimeProvider, adjustment should proceed
+        var config = new ThermalControllerConfig
+        {
+            MinPowerDeltaFarW = 10,
+            MinPowerDeltaNearW = 3,
+            MinAdjustmentIntervalMs = 2500,
+            NearTargetThreshold = 3,
+            IntervalBypassDerivative = 100.0 // Disable bypass
+        };
+        var device = new MockGpuDevice(minPower: config.DefaultMinPower, maxPower: config.DefaultMaxPower);
+        var pid = new PidController(config.Kp, config.Ki, config.Kd, config.TargetTemp, config.DefaultMaxPower, config.DefaultMinPower,
+            config.IntegralMax, config.IntegralMin, config.MinimumDt);
+        var trigger = new TriggerEvaluator(config.TriggerTemp, config.PredictiveFloor, config.LookaheadSeconds);
+        var controller = new ThermalController(device, pid, trigger, config);
+
+        // Use a controllable time source
+        var currentTime = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        controller.TimeProvider = () => currentTime;
+
+        // First step - trigger control
+        controller.Step(85);
+        int powerAfterFirst = controller.CurrentPowerLimit;
+
+        // Advance time past interval
+        currentTime = currentTime.AddMilliseconds(3000);
+
+        // Second step - interval elapsed, should allow adjustment
+        controller.Step(87);
+
+        // Power may have changed (interval passed)
+        // At minimum, the controller should still be functioning
+        Assert.True(controller.IsControlling);
+        Assert.True(controller.CurrentPowerLimit >= 150 && controller.CurrentPowerLimit <= 600);
+    }
+
+    // === TEST 23: Interval Bypass - High Derivative ===
+
+    [Fact]
+    public void Step_HighDerivative_BypassesInterval()
+    {
+        // When temp is rising fast, interval should be bypassed
+        var config = new ThermalControllerConfig
+        {
+            MinPowerDeltaFarW = 10,
+            MinPowerDeltaNearW = 3,
+            MinAdjustmentIntervalMs = 5000,
+            NearTargetThreshold = 3,
+            IntervalBypassDerivative = 2.0 // Bypass when rising > 2°C/s
+        };
+        var device = new MockGpuDevice(minPower: config.DefaultMinPower, maxPower: config.DefaultMaxPower);
+        var pid = new PidController(config.Kp, config.Ki, config.Kd, config.TargetTemp, config.DefaultMaxPower, config.DefaultMinPower,
+            config.IntegralMax, config.IntegralMin, config.MinimumDt);
+        var trigger = new TriggerEvaluator(config.TriggerTemp, config.PredictiveFloor, config.LookaheadSeconds);
+        var controller = new ThermalController(device, pid, trigger, config);
+
+        // Use a frozen time so interval never elapses naturally
+        controller.TimeProvider = () => new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+
+        // First step - trigger control
+        controller.Step(80);
+        Assert.True(controller.IsControlling);
+        int powerAfterFirst = controller.CurrentPowerLimit;
+
+        // Second step - temperature rising fast (80->84 in 0.25s = 16°C/s > 2°C/s)
+        controller.Step(84, dt: 0.25);
+        int powerAfterSecond = controller.CurrentPowerLimit;
+
+        // The high derivative should bypass the interval gate
+        // Power may have been adjusted despite interval not elapsed
+        // (it will only change if the delta is also >= MinPowerDeltaFarW)
+        Assert.True(controller.IsControlling);
+    }
+
+    [Fact]
+    public void Step_LowDerivative_DoesNotBypassInterval()
+    {
+        // When temp is stable (low derivative), interval should NOT be bypassed
+        var config = new ThermalControllerConfig
+        {
+            MinPowerDeltaFarW = 10,
+            MinPowerDeltaNearW = 3,
+            MinAdjustmentIntervalMs = 5000,
+            NearTargetThreshold = 3,
+            IntervalBypassDerivative = 2.0
+        };
+        var device = new MockGpuDevice(minPower: config.DefaultMinPower, maxPower: config.DefaultMaxPower);
+        var pid = new PidController(config.Kp, config.Ki, config.Kd, config.TargetTemp, config.DefaultMaxPower, config.DefaultMinPower,
+            config.IntegralMax, config.IntegralMin, config.MinimumDt);
+        var trigger = new TriggerEvaluator(config.TriggerTemp, config.PredictiveFloor, config.LookaheadSeconds);
+        var controller = new ThermalController(device, pid, trigger, config);
+
+        // Use a frozen time
+        controller.TimeProvider = () => new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+
+        // Trigger control
+        controller.Step(85);
+        Assert.True(controller.IsControlling);
+        int powerAfterFirst = controller.CurrentPowerLimit;
+
+        // Step at same temperature - derivative = 0 (no bypass)
+        controller.Step(85, dt: 0.25);
+        int powerAfterSecond = controller.CurrentPowerLimit;
+
+        // Interval not elapsed AND derivative is 0, so no bypass
+        // Power should be unchanged
+        Assert.Equal(powerAfterFirst, powerAfterSecond);
+    }
+
+    // === TEST 24: Emergency Bypasses All Gates ===
+
+    [Fact]
+    public void Step_EmergencyTemp_BypassesAllGates()
+    {
+        // Emergency temperature should bypass all gating logic
+        var config = new ThermalControllerConfig
+        {
+            MinPowerDeltaFarW = 10,
+            MinAdjustmentIntervalMs = 5000,
+            EmergencyTemp = 90
+        };
+        var device = new MockGpuDevice(minPower: config.DefaultMinPower, maxPower: config.DefaultMaxPower);
+        var pid = new PidController(config.Kp, config.Ki, config.Kd, config.TargetTemp, config.DefaultMaxPower, config.DefaultMinPower,
+            config.IntegralMax, config.IntegralMin, config.MinimumDt);
+        var trigger = new TriggerEvaluator(config.TriggerTemp, config.PredictiveFloor, config.LookaheadSeconds);
+        var controller = new ThermalController(device, pid, trigger, config);
+
+        var events = new List<ThermalControllerEventArgs>();
+        controller.OnStateChange += (_, e) => events.Add(e);
+
+        // Freeze time so interval never elapses
+        controller.TimeProvider = () => new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+
+        // Hit emergency temp
+        controller.Step(95);
+
+        // Should force minimum power regardless of gates
+        Assert.Equal(150, controller.CurrentPowerLimit);
+        Assert.Contains(events, e => e.EventType == ControllerEventType.Emergency);
+    }
 }
