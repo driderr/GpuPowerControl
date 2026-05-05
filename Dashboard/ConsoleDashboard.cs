@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text;
 using System.Threading;
 using Spectre.Console;
 using Spectre.Console.Rendering;
@@ -14,37 +15,67 @@ namespace GpuThermalController.Dashboard;
 public class ConsoleDashboard : IDisposable
 {
     private readonly IDashboardDataProvider _provider;
+    private readonly IAnsiConsole _console;
     private volatile bool _isRunning;
-    private volatile bool _showLog = true;
-    private volatile bool _showConfig = false;
-    private volatile bool _jsonEnabled = false;
+    // Use long for Interlocked operations (Interlocked.Read requires ref long)
+    private long _showLogFlag = 1;
+    private long _showConfigFlag;
+    private long _jsonEnabledFlag;
+    private volatile bool _disposed;
     private Thread? _renderThread;
 
     public ConsoleDashboard(IDashboardDataProvider provider)
+        : this(provider, AnsiConsole.Create(new AnsiConsoleSettings
+        {
+            Out = new AnsiConsoleOutput(System.Console.Out),
+            Interactive = InteractionSupport.Yes,
+        }))
+    {
+    }
+
+    /// <summary>Creates a dashboard with a specific console instance (for testing).</summary>
+    /// <remarks>M1: IAnsiConsole injection for testability.</remarks>
+    public ConsoleDashboard(IDashboardDataProvider provider, IAnsiConsole console)
     {
         _provider = provider;
+        _console = console;
     }
 
     /// <summary>Start the dashboard display.</summary>
     public void Start()
     {
+        // Check if console output is redirected before rendering
+        if (System.Console.IsOutputRedirected)
+        {
+            _console.WriteLine("[dim]Non-interactive console detected. Dashboard rendering disabled.[/]");
+            return;
+        }
+
         _isRunning = true;
 
         _renderThread = new Thread(() =>
         {
-            while (_isRunning)
-            {
-                try
+            // Live.Start() is blocking - the render loop runs inside its callback.
+            // We use a mutable Rows object and call ctx.UpdateTarget() to swap it each frame.
+            _console.Live(new Rows())
+                .Overflow(VerticalOverflow.Visible)
+                .Start(ctx =>
                 {
-                    Render();
-                }
-                catch
-                {
-                    // Ignore render errors
-                }
+                    while (_isRunning)
+                    {
+                        try
+                        {
+                            var renderables = RenderFrame();
+                            ctx.UpdateTarget(new Rows(renderables));
+                        }
+                        catch
+                        {
+                            // Ignore render errors
+                        }
 
-                Thread.Sleep(250);
-            }
+                        Thread.Sleep(250);
+                    }
+                });
         })
         {
             IsBackground = true,
@@ -53,70 +84,100 @@ public class ConsoleDashboard : IDisposable
         _renderThread.Start();
     }
 
-    private void Render()
+    private List<IRenderable> RenderFrame()
     {
         var config = _provider.Config;
         var current = _provider.Current;
 
-        // Determine state color
-        var stateColor = Color.Default;
-        if (current.EventType == Core.ControllerEventType.Emergency) stateColor = Color.Red;
-        else if (current.EventType == Core.ControllerEventType.Stable) stateColor = Color.Green;
-        else if (current.IsControlling) stateColor = Color.Yellow;
-        else stateColor = Color.Cyan;
+        // Determine state color name for Style.Parse
+        var stateColorName = current.IsControlling ? "yellow"
+            : current.EventType == Core.ControllerEventType.Emergency ? "red"
+            : current.EventType == Core.ControllerEventType.Stable ? "green"
+            : "cyan";
 
         var renderables = new List<IRenderable>();
 
         // === HEADER ===
-        renderables.Add(new Rule($"[bold green]GpuPowerControl[/] - {config.GpuName}"));
-        renderables.Add(new Text($"[gray]Uptime: {FormatTimespan(current.Uptime)}[/]"));
+        renderables.Add(new Rule($"[bold green]GpuPowerControl[/] - {Markup.Escape(config.GpuName)}"));
+        renderables.Add(new Markup($"[gray]Uptime: {FormatTimespan(current.Uptime)}[/]"));
 
         // === STATE & POWER ===
-        var stateText = current.IsControlling ? "[CONTROLLING]" : "[IDLE]";
-        var statePanel = new Panel(new Text(stateText))
+        // Use Panel widgets for colored bordered boxes, placed side by side with Columns
+        var stateColor = stateColorName switch
         {
-            Border = BoxBorder.Rounded,
-            BorderStyle = new Style(stateColor)
+            "yellow" => Color.Yellow, "red" => Color.Red, "green" => Color.Green, _ => Color.Cyan
+        };
+        var statePanel = new Panel(new Text(current.IsControlling ? "CONTROLLING" : "IDLE"))
+        {
+            BorderStyle = new Style(stateColor),
+            Border = BoxBorder.Rounded
         };
 
         var powerPanel = new Panel(new Text($"{current.CurrentPowerLimit}W / {config.MaxPower}W"))
         {
-            Border = BoxBorder.Rounded,
-            BorderStyle = new Style(Color.Yellow)
+            BorderStyle = new Style(Color.Yellow),
+            Border = BoxBorder.Rounded
         };
 
-        renderables.Add(new Columns(new IRenderable[] { statePanel, powerPanel }));
+        // Use Grid with expanding first column + fixed second column
+        // so the power box stays pinned to the same position regardless of state text length
+        var statePowerGrid = new Grid();
+        statePowerGrid.AddColumn();                          // expands left (default)
+        statePowerGrid.AddColumn(new GridColumn { Width = 22 }); // fixed right
+        statePowerGrid.AddRow(statePanel, powerPanel);
+        renderables.Add(statePowerGrid);
 
         // === TEMPERATURE BAR ===
         renderables.Add(new Text("\n"));
-        renderables.Add(new Text($"Temp: [bold]{current.Temperature}C[/]  |  Target: {config.TargetTemp}C  |  Trigger: {config.TriggerTemp}C  |  Emergency: {config.EmergencyTemp}C"));
+        renderables.Add(new Markup($"Temp: [bold]{current.Temperature}C[/]  |  Target: {config.TargetTemp}C  |  Trigger: {config.TriggerTemp}C  |  Emergency: {config.EmergencyTemp}C"));
         renderables.Add(CreateTempBar(current.Temperature, config));
 
         // === POWER BAR ===
         renderables.Add(new Text("\n"));
-        renderables.Add(new Text($"Power: [bold]{current.CurrentPowerLimit}W[/]  |  Range: {config.MinPower}W - {config.MaxPower}W"));
+        renderables.Add(new Markup($"Power: [bold]{current.CurrentPowerLimit}W[/]  |  Range: {config.MinPower}W - {config.MaxPower}W"));
         renderables.Add(CreatePowerBar(current, config));
 
-        // === DERIVATIVE & STATS ===
-        renderables.Add(new Text("\n"));
+        // === MAIN BODY: Grid with left (stats) and right (charts) side by side ===
         var derivColor = current.Derivative > 0 ? Color.Yellow : Color.Green;
         var derivStr = current.Derivative.ToString("+0.0;-0.0;0.0");
-        renderables.Add(new Text(
-            $"Derivative: [{derivColor}]{derivStr} C/s[/]  |  PID Cycles: {current.PidCycles}  |  Transitions: {current.StateTransitions}  |  Polling: {current.PollingIntervalMs}ms"));
 
-        // === PID BREAKDOWN ===
+        // Build left column content: stats + PID + config + JSON status
+        var leftContent = new List<IRenderable>();
+        leftContent.Add(new Text("\n"));
+
+        // Stats table
+        var statsTable = new Table()
+            .Border(TableBorder.None)
+            .HideHeaders()
+            .AddColumn(new TableColumn("").Padding(0, 0))
+            .AddColumn(new TableColumn("").Padding(0, 0));
+        statsTable.AddRow("Derivative:", $"[{derivColor}]{derivStr} C/s[/]");
+        statsTable.AddRow("PID Cycles:", $"{current.PidCycles}");
+        statsTable.AddRow("Transitions:", $"{current.StateTransitions}");
+        statsTable.AddRow("Polling:", $"{current.PollingIntervalMs}ms");
+        leftContent.Add(statsTable);
+
+        // PID breakdown
         if (current.IsControlling && (current.PidP != 0 || current.PidI != 0 || current.PidD != 0))
         {
-            renderables.Add(new Text("\n"));
-            renderables.Add(new Text("[bold]PID Breakdown:[/]"));
-            renderables.Add(new Text(
-                $"  P: [magenta]{current.PidP:+0.0;-0.0;0.0}[/]  |  I: [blue]{current.PidI:+0.0;-0.0;0.0}[/]  |  D: [green]{current.PidD:+0.0;-0.0;0.0}[/]  |  Integral: [gray]{current.PidIntegral:+0.0;-0.0;0.0}[/]"));
+            leftContent.Add(new Text("\n"));
+            leftContent.Add(new Markup("[bold]PID Breakdown:[/]"));
+            var pidTable = new Table()
+                .Border(TableBorder.None)
+                .HideHeaders()
+                .AddColumn(new TableColumn("").Padding(0, 0))
+                .AddColumn(new TableColumn("").Padding(0, 0));
+            pidTable.AddRow("P:", $"[magenta]{current.PidP:+0.0;-0.0;0.0}[/]");
+            pidTable.AddRow("I:", $"[blue]{current.PidI:+0.0;-0.0;0.0}[/]");
+            pidTable.AddRow("D:", $"[green]{current.PidD:+0.0;-0.0;0.0}[/]");
+            pidTable.AddRow("Integral:", $"[gray]{current.PidIntegral:+0.0;-0.0;0.0}[/]");
+            leftContent.Add(pidTable);
         }
 
-        // === STATIC CONFIG (toggleable) ===
-        if (_showConfig)
+        // Config table (toggleable)
+        if (Interlocked.Read(ref _showConfigFlag) != 0)
         {
-            renderables.Add(new Text("\n"));
+            leftContent.Add(new Text("\n"));
             var configTable = new Table()
                 .Border(TableBorder.Rounded)
                 .AddColumn("Parameter")
@@ -128,181 +189,267 @@ public class ConsoleDashboard : IDisposable
             configTable.AddRow("Trigger", $"{config.TriggerTemp}C");
             configTable.AddRow("Emergency", $"{config.EmergencyTemp}C");
             configTable.AddRow("Power Range", $"{config.MinPower}W - {config.MaxPower}W");
-            renderables.Add(configTable);
+            leftContent.Add(configTable);
         }
 
-        // === JSON STATUS ===
-        renderables.Add(new Text("\n"));
-        var jsonLabel = _jsonEnabled ? "[green]ON[/]" : "[gray]OFF[/]";
-        renderables.Add(new Text($"JSON Publishing: {jsonLabel}  |  Read Failures: {current.ReadFailures}"));
+        // JSON status
+        leftContent.Add(new Text("\n"));
+        var jsonLabel = Interlocked.Read(ref _jsonEnabledFlag) != 0 ? "[green]ON[/]" : "[gray]OFF[/]";
+        leftContent.Add(new Markup($"JSON Publishing: {jsonLabel}  |  Read Failures: {current.ReadFailures}"));
 
-        // === HISTORY PANELS ===
+        // Build right column content: history charts
         var history = _provider.GetHistory(80);
-        if (history.Count >= 5)
-        {
-            renderables.Add(new Text("\n"));
-            renderables.Add(BuildHistoryChart(history));
-        }
+        IRenderable rightContent = history.Count >= 5 ? BuildHistoryColumn(history) : new Markup("[dim]Waiting for data...[/]");
 
-        // === EVENT LOG ===
-        if (_showLog)
-        {
-            var events = _provider.GetEvents(10);
-            if (events.Count > 0)
-            {
-                renderables.Add(new Text("\n"));
-                renderables.Add(new Rule("[bold]Event Log[/]"));
-                foreach (var evt in events)
-                {
-                    var color = evt.EventType switch
-                    {
-                        Core.ControllerEventType.Emergency => Color.Red,
-                        Core.ControllerEventType.Warning => Color.Yellow,
-                        Core.ControllerEventType.Trigger => Color.Magenta,
-                        Core.ControllerEventType.Stable => Color.Green,
-                        _ => Color.Gray
-                    };
-                    var msg = evt.Message ?? "";
-                    var timeStr = evt.Timestamp.ToString("HH:mm:ss");
-                    renderables.Add(new Text($"[{timeStr}] [{color}]{msg}[/]"));
-                }
-            }
-        }
+        // Grid: left expands, right fixed at 100 chars (no Expand to avoid full-width forcing)
+        var bodyGrid = new Grid();
+        bodyGrid.AddColumn(new GridColumn());               // expands
+        bodyGrid.AddColumn(new GridColumn { Width = 100 }); // fixed
+        bodyGrid.AddRow(new Rows(leftContent), rightContent);
+        renderables.Add(bodyGrid);
+
+        // === EVENT LOG (full width, below everything) ===
+        var events = _provider.GetEvents(23);
+        renderables.Add(new Text("\n"));
+        renderables.Add(BuildLogContent(events));
 
         // === FOOTER ===
         renderables.Add(new Text("\n"));
-        renderables.Add(new Text("[gray]Q:Quit  L:Toggle Log  J:Toggle JSON  E:Export CSV  H:Toggle Config[/]"));
+        renderables.Add(new Markup("[gray]Q:Quit  L:Toggle Log  J:Toggle JSON  E:Export CSV  H:Toggle Config[/]"));
 
-        // Render all at once
-        Console.Write("\x1b[2J\x1b[H");
-        AnsiConsole.Write(new Rows(renderables));
+        return renderables;
     }
 
     private IRenderable CreateTempBar(uint temp, DashboardConfig config)
     {
-        var width = 40;
-        var ratio = Math.Clamp((float)temp / config.EmergencyTemp, 0, 1);
-        var filled = (int)(ratio * width);
-
-        var color = temp <= config.TargetTemp ? Color.Green
+        var barColor = temp <= config.TargetTemp ? Color.Green
             : temp < config.TriggerTemp ? Color.Yellow
             : Color.Red;
 
-        var segments = new List<Segment>();
-        for (int i = 0; i < width; i++)
-        {
-            segments.Add(new Segment(i < filled ? "█" : "░", new Style(color)));
-        }
-        segments.Add(Segment.LineBreak);
-
-        return new SegmentString(segments);
+        var barWidth = 40;
+        var fillCount = (int)Math.Round((float)temp / config.EmergencyTemp * barWidth);
+        fillCount = Math.Clamp(fillCount, 0, barWidth);
+        var bar = new string('█', fillCount) + new string(' ', barWidth - fillCount);
+        return new Markup($"[{barColor}]{bar}[/]");
     }
-
     private IRenderable CreatePowerBar(MetricsSnapshot current, DashboardConfig config)
     {
-        var width = 40;
         var range = config.MaxPower - config.MinPower;
         var ratio = range > 0 ? (float)(current.CurrentPowerLimit - config.MinPower) / range : 1;
         ratio = Math.Clamp(ratio, 0, 1);
-        var filled = (int)(ratio * width);
 
-        var segments = new List<Segment>();
-        for (int i = 0; i < width; i++)
-        {
-            segments.Add(new Segment(i < filled ? "█" : "░", new Style(Color.Yellow)));
-        }
-        segments.Add(Segment.LineBreak);
-
-        return new SegmentString(segments);
+        var barWidth = 40;
+        var fillCount = (int)Math.Round(ratio * barWidth);
+        fillCount = Math.Clamp(fillCount, 0, barWidth);
+        var bar = new string('█', fillCount) + new string(' ', barWidth - fillCount);
+        return new Markup($"[yellow]{bar}[/]");
     }
 
     private IRenderable BuildHistoryChart(IReadOnlyList<MetricsSnapshot> history)
     {
-        var temps = history.Select(h => (float)h.Temperature).ToList();
-        var chartWidth = Math.Min(temps.Count, 80);
-        var slicedTemps = temps.TakeLast(chartWidth).ToList();
+        var result = new List<IRenderable>();
 
-        var minTemp = slicedTemps.Min() - 2;
-        var maxTemp = slicedTemps.Max() + 2;
-        var tempRange = maxTemp - minTemp;
-        if (tempRange < 5) tempRange = 5;
-
-        var chartHeight = 6;
-        var segments = new List<Segment>();
-
-        // Title
-        segments.Add(new Segment("[bold]Temperature History[/]\n", Style.Plain));
-
-        for (int row = chartHeight - 1; row >= 0; row--)
-        {
-            var threshold = minTemp + (tempRange * (row + 1) / chartHeight);
-            segments.Add(new Segment($" {threshold:F0}C ", new Style(Color.Gray)));
-            segments.Add(new Segment("│", new Style(Color.Gray)));
-
-            foreach (var t in slicedTemps)
-            {
-                var height = (t - minTemp) / tempRange * chartHeight;
-                if (height > row)
-                    segments.Add(new Segment("█", new Style(Color.Cyan)));
-                else
-                    segments.Add(new Segment(" ", Style.Plain));
-            }
-            segments.Add(Segment.LineBreak);
-        }
-
-        segments.Add(new Segment("     " + new string('─', chartWidth + 1) + " newer", new Style(Color.Gray)));
-        segments.Add(Segment.LineBreak);
+        // Temperature history
+        result.Add(new Markup("[bold]Temperature History[/]"));
+        result.Add(BuildAsciiChart(
+            history.Select(h => (float)h.Temperature).ToList(),
+            "C",
+            Color.Cyan,
+            minPadding: 2,
+            minRange: 5,
+            chartHeight: 6,
+            chartWidth: 80));
 
         // Power history
-        var powers = history.Select(h => (float)h.CurrentPowerLimit).ToList();
-        var slicedPowers = powers.TakeLast(chartWidth).ToList();
-        var minPower = slicedPowers.Min() - 10;
-        var maxPower = slicedPowers.Max() + 10;
-        var powerRange = maxPower - minPower;
-        if (powerRange < 20) powerRange = 20;
+        result.Add(new Markup("[bold]Power History[/]"));
+        result.Add(BuildAsciiChart(
+            history.Select(h => (float)h.CurrentPowerLimit).ToList(),
+            "W",
+            Color.Yellow,
+            minPadding: 10,
+            minRange: 20,
+            chartHeight: 6,
+            chartWidth: 80));
 
-        segments.Add(Segment.LineBreak);
-        segments.Add(new Segment("[bold]Power History[/]\n", Style.Plain));
+        return new Rows(result);
+    }
 
+    private IRenderable BuildAsciiChart(
+        List<float> values,
+        string unit,
+        Color barColor,
+        float minPadding,
+        float minRange,
+        int chartHeight,
+        int chartWidth)
+    {
+        var sliced = values.TakeLast(chartWidth).ToList();
+        var minVal = sliced.Min() - minPadding;
+        var maxVal = sliced.Max() + minPadding;
+        var range = maxVal - minVal;
+        if (range < minRange) range = minRange;
+
+        var segments = new List<Segment>();
+
+        // Build each row
         for (int row = chartHeight - 1; row >= 0; row--)
         {
-            var threshold = minPower + (powerRange * (row + 1) / chartHeight);
-            segments.Add(new Segment($" {threshold:F0}W ", new Style(Color.Gray)));
+            var threshold = minVal + (range * (row + 1) / chartHeight);
+            segments.Add(new Segment($" {threshold:F0}{unit} ", new Style(Color.Gray)));
             segments.Add(new Segment("│", new Style(Color.Gray)));
 
-            foreach (var p in slicedPowers)
+            foreach (var v in sliced)
             {
-                var height = (p - minPower) / powerRange * chartHeight;
+                var height = (v - minVal) / range * chartHeight;
                 if (height > row)
-                    segments.Add(new Segment("█", new Style(Color.Yellow)));
+                    segments.Add(new Segment("█", new Style(barColor)));
                 else
                     segments.Add(new Segment(" ", Style.Plain));
             }
             segments.Add(Segment.LineBreak);
         }
 
-        segments.Add(new Segment("     " + new string('─', chartWidth + 1) + " newer", new Style(Color.Gray)));
+        // Axis line
+        segments.Add(new Segment("     " + new string('─', sliced.Count + 1) + " newer", new Style(Color.Gray)));
         segments.Add(Segment.LineBreak);
 
-        return new SegmentString(segments);
+        return new SegmentString(segments, sliced.Count + 10);
     }
 
     /// <summary>Toggle event log visibility.</summary>
     public void ToggleLog()
     {
-        _showLog = !_showLog;
+        Interlocked.Exchange(ref _showLogFlag, Interlocked.Read(ref _showLogFlag) != 0 ? 0 : 1);
     }
 
     /// <summary>Toggle config display.</summary>
     public void ToggleConfig()
     {
-        _showConfig = !_showConfig;
+        Interlocked.Exchange(ref _showConfigFlag, Interlocked.Read(ref _showConfigFlag) != 0 ? 0 : 1);
     }
 
     /// <summary>Update JSON publishing status (for display).</summary>
     public void SetJsonStatus(bool enabled)
     {
-        _jsonEnabled = enabled;
+        Interlocked.Exchange(ref _jsonEnabledFlag, enabled ? 1 : 0);
+    }
+
+    /// <summary>Builds the event log content as a Rows renderable.</summary>
+    private IRenderable BuildLogContent(IReadOnlyList<DashboardEvent> events)
+    {
+        var items = new List<IRenderable>();
+        items.Add(new Rule("[bold]Event Log[/]"));
+
+        if (Interlocked.Read(ref _showLogFlag) == 0)
+        {
+            items.Add(new Markup("[dim]Log hidden (press L to show)[/]"));
+            return new Rows(items);
+        }
+
+        if (events.Count == 0)
+        {
+            items.Add(new Markup("[dim]No events[/]"));
+            return new Rows(items);
+        }
+
+        foreach (var evt in events)
+        {
+            var color = evt.EventType switch
+            {
+                Core.ControllerEventType.Emergency => Color.Red,
+                Core.ControllerEventType.Warning => Color.Yellow,
+                Core.ControllerEventType.Trigger => Color.Magenta,
+                Core.ControllerEventType.Stable => Color.Green,
+                _ => Color.Gray
+            };
+            var msg = Markup.Escape(evt.Message ?? "");
+            var timeStr = Markup.Escape(evt.Timestamp.ToString("HH:mm:ss"));
+            items.Add(new Markup($"{timeStr} [{color}]{msg}[/]"));
+        }
+
+        return new Rows(items);
+    }
+
+    /// <summary>Builds history charts stacked in a fixed-width column.</summary>
+    private static IRenderable BuildHistoryColumn(IReadOnlyList<MetricsSnapshot> history)
+    {
+        var items = new List<IRenderable>();
+
+        // Temperature history (wider for right column)
+        items.Add(new Markup("[bold]Temperature History[/]"));
+        items.Add(BuildNarrowAsciiChart(
+            history.Select(h => (float)h.Temperature).ToList(),
+            "C", Color.Cyan,
+            minPadding: 2, minRange: 5,
+            chartHeight: 6, chartWidth: 80));
+
+        items.Add(new Text(""));
+
+        // Power history
+        items.Add(new Markup("[bold]Power History[/]"));
+        items.Add(BuildNarrowAsciiChart(
+            history.Select(h => (float)h.CurrentPowerLimit).ToList(),
+            "W", Color.Yellow,
+            minPadding: 10, minRange: 20,
+            chartHeight: 6, chartWidth: 80));
+
+        return new Rows(items);
+    }
+
+    /// <summary>Builds a narrow ASCII bar chart as segments (for the right column).</summary>
+    private static IRenderable BuildNarrowAsciiChart(
+        List<float> values, string unit, Color barColor,
+        float minPadding, float minRange, int chartHeight, int chartWidth)
+    {
+        var sliced = values.TakeLast(chartWidth).ToList();
+        var minVal = sliced.Min() - minPadding;
+        var maxVal = sliced.Max() + minPadding;
+        var range = maxVal - minVal;
+        if (range < minRange) range = minRange;
+
+        var segments = new List<Segment>();
+
+        for (int row = chartHeight - 1; row >= 0; row--)
+        {
+            var threshold = minVal + (range * (row + 1) / chartHeight);
+            segments.Add(new Segment($" {threshold:F0}{unit} ", new Style(Color.Gray)));
+            segments.Add(new Segment("│", new Style(Color.Gray)));
+
+            foreach (var v in sliced)
+            {
+                var height = (v - minVal) / range * chartHeight;
+                if (height > row)
+                    segments.Add(new Segment("█", new Style(barColor)));
+                else
+                    segments.Add(new Segment(" ", Style.Plain));
+            }
+            segments.Add(Segment.LineBreak);
+        }
+
+        segments.Add(new Segment("   " + new string('─', sliced.Count) + " →", new Style(Color.Gray)));
+        segments.Add(Segment.LineBreak);
+
+        return new SegmentString(segments, chartWidth + 8);
+    }
+
+    /// <summary>Builds a 3-line rounded box as segments with the given style on all parts.</summary>
+    private static SegmentString BuildColoredBox(string innerText, Style style)
+    {
+        var top = $"╭{new string('─', innerText.Length)}╮";
+        var mid = $"│{innerText}│";
+        var bot = $"╰{new string('─', innerText.Length)}╯";
+
+        var segments = new[]
+        {
+            new Segment(top, style),
+            Segment.LineBreak,
+            new Segment(mid, style),
+            Segment.LineBreak,
+            new Segment(bot, style),
+            Segment.LineBreak
+        };
+
+        return new SegmentString(segments, mid.Length + 2);
     }
 
     private static string FormatTimespan(TimeSpan ts)
@@ -316,6 +463,9 @@ public class ConsoleDashboard : IDisposable
 
     public void Dispose()
     {
+        if (_disposed) return;
+        _disposed = true;
+
         _isRunning = false;
         _renderThread?.Join(2000);
         _renderThread = null;
@@ -328,15 +478,18 @@ public class ConsoleDashboard : IDisposable
 public class SegmentString : IRenderable
 {
     private readonly Segment[] _segments;
+    private readonly int _width;
 
-    public SegmentString(IEnumerable<Segment> segments)
+    public SegmentString(IEnumerable<Segment> segments, int width = 0)
     {
         _segments = segments.ToArray();
+        _width = width;
     }
 
     public Measurement Measure(RenderOptions options, int maxAvailableWidth)
     {
-        return new Measurement(0, maxAvailableWidth);
+        var minWidth = _width > 0 ? _width : 40;
+        return new Measurement(minWidth, maxAvailableWidth);
     }
 
     public IEnumerable<Segment> Render(RenderOptions options, int maxAvailableWidth)
@@ -349,3 +502,4 @@ public class SegmentString : IRenderable
         return string.Join("", _segments);
     }
 }
+

@@ -397,7 +397,7 @@ public class ThermalControllerTests
         controller.OnStep += (_, e) => lastStep = e;
 
         controller.Step(60);  // idle
-        Assert.False(lastStep.IsControlling);
+        Assert.False(lastStep!.IsControlling);
 
         controller.Step(85);  // trigger
         Assert.True(lastStep.IsControlling);
@@ -414,7 +414,7 @@ public class ThermalControllerTests
         controller.Step(60);  // first step, derivative from 75 default
         controller.Step(70);  // 10 degree rise
 
-        Assert.NotEqual(0, lastStep.Derivative);
+        Assert.NotEqual(0, lastStep!.Derivative);
     }
 
     // === TEST 17: PidCycles Counter ===
