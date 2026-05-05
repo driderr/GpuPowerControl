@@ -23,6 +23,7 @@ public class ConsoleDashboard : IDisposable
     private long _jsonEnabledFlag;
     private volatile bool _disposed;
     private Thread? _renderThread;
+    private readonly List<ErrorEntry> _collectedErrors = new();
 
     public ConsoleDashboard(IDashboardDataProvider provider)
         : this(provider, AnsiConsole.Create(new AnsiConsoleSettings
@@ -86,8 +87,13 @@ public class ConsoleDashboard : IDisposable
 
     private List<IRenderable> RenderFrame()
     {
-        // Drain pending errors from ErrorConsole so they render inside the Live display
-        var pendingErrors = ErrorConsole.DrainPending();
+        // Drain pending errors from ErrorConsole into persistent list
+        var drained = ErrorConsole.DrainPending();
+        foreach (var entry in drained)
+            _collectedErrors.Add(entry);
+        // Keep bounded to last 50 entries
+        while (_collectedErrors.Count > 50)
+            _collectedErrors.RemoveAt(0);
 
         var config = _provider.Config;
         var current = _provider.Current;
@@ -214,7 +220,7 @@ public class ConsoleDashboard : IDisposable
         // === EVENT LOG (full width, below everything) ===
         var events = _provider.GetEvents(23);
         renderables.Add(new Text("\n"));
-        renderables.Add(BuildLogContent(events, pendingErrors));
+        renderables.Add(BuildLogContent(events, _collectedErrors));
 
         // === FOOTER ===
         renderables.Add(new Text("\n"));
