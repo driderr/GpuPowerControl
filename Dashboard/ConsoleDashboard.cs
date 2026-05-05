@@ -24,6 +24,7 @@ public class ConsoleDashboard : IDisposable
     private volatile bool _disposed;
     private Thread? _renderThread;
     private readonly List<ErrorEntry> _collectedErrors = new();
+    private const int MaxLogEntries = 23;
 
     public ConsoleDashboard(IDashboardDataProvider provider)
         : this(provider, AnsiConsole.Create(new AnsiConsoleSettings
@@ -91,9 +92,6 @@ public class ConsoleDashboard : IDisposable
         var drained = ErrorConsole.DrainPending();
         foreach (var entry in drained)
             _collectedErrors.Add(entry);
-        // Keep bounded to last 50 entries
-        while (_collectedErrors.Count > 50)
-            _collectedErrors.RemoveAt(0);
 
         var config = _provider.Config;
         var current = _provider.Current;
@@ -218,9 +216,9 @@ public class ConsoleDashboard : IDisposable
         renderables.Add(bodyGrid);
 
         // === EVENT LOG (full width, below everything) ===
-        var events = _provider.GetEvents(23);
+        var events = _provider.GetEvents(MaxLogEntries);
         renderables.Add(new Text("\n"));
-        renderables.Add(BuildLogContent(events, _collectedErrors));
+        renderables.Add(BuildLogContent(events));
 
         // === FOOTER ===
         renderables.Add(new Text("\n"));
@@ -344,7 +342,7 @@ public class ConsoleDashboard : IDisposable
     }
 
     /// <summary>Builds the event log content as a Rows renderable.</summary>
-    private IRenderable BuildLogContent(IReadOnlyList<DashboardEvent> events, List<ErrorEntry> pendingErrors)
+    private IRenderable BuildLogContent(IReadOnlyList<DashboardEvent> events)
     {
         var items = new List<IRenderable>();
         items.Add(new Rule("[bold]Event Log[/]"));
@@ -355,8 +353,10 @@ public class ConsoleDashboard : IDisposable
             return new Rows(items);
         }
 
-        // Render pending ErrorConsole entries first (they appear in the Live display)
-        foreach (var err in pendingErrors)
+        // Merge errors and controller events into one chronological list
+        var allEntries = new List<LogLine>();
+
+        foreach (var err in _collectedErrors)
         {
             var color = err.Level switch
             {
@@ -364,16 +364,8 @@ public class ConsoleDashboard : IDisposable
                 "WARN" => Color.Yellow,
                 _ => Color.Gray
             };
-            var msg = Markup.Escape(err.Message);
-            var timeStr = err.Timestamp.ToString("HH:mm:ss");
             var icon = err.Level switch { "ERROR" => "\u2715", "WARN" => "\u26A0", _ => "?" };
-            items.Add(new Markup($"{timeStr} [{color}]{icon} {err.Level}: {msg}[/]"));
-        }
-
-        if (events.Count == 0 && pendingErrors.Count == 0)
-        {
-            items.Add(new Markup("[dim]No events[/]"));
-            return new Rows(items);
+            allEntries.Add(new LogLine(err.Timestamp, color, $"{icon} {err.Level}: {Markup.Escape(err.Message)}"));
         }
 
         foreach (var evt in events)
@@ -386,13 +378,36 @@ public class ConsoleDashboard : IDisposable
                 Core.ControllerEventType.Stable => Color.Green,
                 _ => Color.Gray
             };
-            var msg = Markup.Escape(evt.Message ?? "");
-            var timeStr = Markup.Escape(evt.Timestamp.ToString("HH:mm:ss"));
-            items.Add(new Markup($"{timeStr} [{color}]{msg}[/]"));
+            allEntries.Add(new LogLine(evt.Timestamp, color, Markup.Escape(evt.Message ?? "")));
+        }
+
+        if (allEntries.Count == 0)
+        {
+            items.Add(new Markup("[dim]No events[/]"));
+            return new Rows(items);
+        }
+
+        // Sort by timestamp ascending (oldest first), then take the most recent MaxLogEntries
+        allEntries.Sort((a, b) => a.Timestamp.CompareTo(b.Timestamp));
+        if (allEntries.Count > MaxLogEntries)
+            allEntries = allEntries.Skip(allEntries.Count - MaxLogEntries).ToList();
+
+        // Bound the collected errors list to prevent unbounded growth
+        while (_collectedErrors.Count > MaxLogEntries)
+            _collectedErrors.RemoveAt(0);
+
+        // Render oldest first (top) to newest (bottom)
+        foreach (var line in allEntries)
+        {
+            var timeStr = line.Timestamp.ToString("HH:mm:ss");
+            items.Add(new Markup($"{timeStr} [{line.Color}]{line.Text}[/]"));
         }
 
         return new Rows(items);
     }
+
+    /// <summary>Simple record for a unified log line.</summary>
+    private record LogLine(DateTime Timestamp, Color Color, string Text);
 
     /// <summary>Builds history charts stacked in a fixed-width column.</summary>
     private static IRenderable BuildHistoryColumn(IReadOnlyList<MetricsSnapshot> history)
