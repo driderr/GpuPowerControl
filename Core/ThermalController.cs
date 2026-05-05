@@ -20,14 +20,26 @@ namespace GpuThermalController.Core
         private uint _lastKnownGoodTemp;
         private int _currentPowerLimit;
         private int _consecutiveReadFailures;
+        private int _pidCycles;
+        private int _stateTransitions;
         private CancellationTokenSource? _cts;
 
         public bool IsControlling => _isControlling;
         public int CurrentPowerLimit => _currentPowerLimit;
         public uint LastKnownGoodTemp => _lastKnownGoodTemp;
+        public PidController PidController => _pidController;
+        public ThermalControllerConfig Config => _config;
+        public int ConsecutiveReadFailures => _consecutiveReadFailures;
+        public int PidCycles => _pidCycles;
+        public int StateTransitions => _stateTransitions;
 
         /// <summary>Raised on significant state changes (trigger engage/disengage, power changes, emergencies).</summary>
         public event EventHandler<ThermalControllerEventArgs>? OnStateChange;
+
+        /// <summary>Raised after each step completes. Used by the dashboard data provider.</summary>
+        public event EventHandler<StepEventArgs>? OnStep;
+
+        public record StepEventArgs(uint Temperature, double Derivative, bool IsControlling);
 
         public ThermalController(
             IGpuDevice device,
@@ -42,6 +54,8 @@ namespace GpuThermalController.Core
             _lastKnownGoodTemp = config.TargetTemp;
             _currentPowerLimit = device.MaxPower;
             _consecutiveReadFailures = 0;
+            _pidCycles = 0;
+            _stateTransitions = 0;
         }
 
         /// <summary>
@@ -88,6 +102,7 @@ namespace GpuThermalController.Core
                     ControllerEventType.Emergency,
                     $"[EMERGENCY] Temp hit {currentTemp}C! Forcing minimum power limit ({_device.MinPower}W).");
                 _lastKnownGoodTemp = currentTemp;
+                OnStep?.Invoke(this, new StepEventArgs(currentTemp, 0, _isControlling));
                 return;
             }
 
@@ -100,8 +115,9 @@ namespace GpuThermalController.Core
                 TriggerResult trigger = _triggerEvaluator.Evaluate(currentTemp, derivative, _isControlling);
 
                 if (trigger != TriggerResult.None)
-                {
+                    {
                     _isControlling = true;
+                    _stateTransitions++;
                     _pidController.Reset();
 
                     string msg = trigger == TriggerResult.Predictive
@@ -115,6 +131,7 @@ namespace GpuThermalController.Core
             // 3. PID CONTROL
             if (_isControlling)
             {
+                _pidCycles++;
                 int newPower = _pidController.CalculatePowerLimit(currentTemp, _lastKnownGoodTemp, dt);
 
                 if (newPower != _currentPowerLimit)
@@ -127,8 +144,9 @@ namespace GpuThermalController.Core
 
                 // Exit condition: temp sufficiently below target AND power fully restored
                 if (currentTemp <= _config.TargetTemp - _config.ExitHysteresis && _currentPowerLimit >= _device.MaxPower)
-                {
+                    {
                     _isControlling = false;
+                    _stateTransitions++;
                     _pidController.Reset();
                     RaiseEvent(currentTemp, _currentPowerLimit, _isControlling,
                         ControllerEventType.Stable,
@@ -137,6 +155,9 @@ namespace GpuThermalController.Core
             }
 
             _lastKnownGoodTemp = currentTemp;
+
+            // Raise step event for dashboard data provider
+            OnStep?.Invoke(this, new StepEventArgs(currentTemp, derivative, _isControlling));
         }
 
         private void MainLoop(CancellationToken token)

@@ -1,7 +1,9 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Security.Principal;
+using System.Threading;
 using GpuThermalController.Core;
+using GpuThermalController.Dashboard;
 using GpuThermalController.Interfaces;
 using GpuThermalController.Nvml;
 
@@ -48,40 +50,94 @@ namespace GpuThermalController
 
             var controller = new ThermalController(device, pidController, triggerEvaluator, config);
 
-            controller.OnStateChange += (sender, e) =>
+            // === DASHBOARD WIRING ===
+
+            // 1. Create the data provider (collects metrics from controller via events)
+            var dataProvider = new DashboardDataProvider(device, config);
+            dataProvider.Subscribe(controller);
+
+            // 2. Create the console dashboard (renders to terminal)
+            var dashboard = new ConsoleDashboard(dataProvider);
+
+            // 3. Create the JSON publisher (writes to disk, togglable)
+            var jsonPublisher = new JsonPublisher(dataProvider);
+            jsonPublisher.Start(enabled: false);
+
+            // 4. Create the key handler (keyboard shortcuts)
+            var keyHandler = new KeyHandler();
+
+            // Create cancellation token source before wiring events that capture it
+            var cancellationTokenSource = new CancellationTokenSource();
+
+            // Wire up key handler events
+            keyHandler.QuitRequested += () =>
             {
-                if (e.Message == null) return;
+                Console.CancelKeyPress -= CancelKeyHandler;
+                controller.Stop();
+                cancellationTokenSource.Cancel();
+            };
 
-                Console.ForegroundColor = e.EventType switch
+            keyHandler.ToggleLogRequested += () =>
+            {
+                dashboard.ToggleLog();
+            };
+
+            keyHandler.ToggleJsonRequested += () =>
+            {
+                jsonPublisher.Toggle();
+                dashboard.SetJsonStatus(jsonPublisher.IsEnabled);
+            };
+
+            keyHandler.ExportCsvRequested += () =>
+            {
+                var events = dataProvider.GetEvents(500);
+                try
                 {
-                    ControllerEventType.Emergency => ConsoleColor.Red,
-                    ControllerEventType.Stable    => ConsoleColor.Green,
-                    ControllerEventType.Trigger   => ConsoleColor.Magenta,
-                    ControllerEventType.Warning   => ConsoleColor.Yellow,
-                    _ => e.Temperature >= config.TargetTemp ? ConsoleColor.Yellow : ConsoleColor.Cyan
-                };
+                    var timestamp = DateTime.UtcNow.ToString("yyyyMMdd-HHmmss-fff");
+                    var filePath = $"data/export-{timestamp}.csv";
+                    CsvExporter.ExportToCsv(events, filePath);
+                }
+                catch
+                {
+                    // Silently ignore export errors
+                }
+            };
 
-                bool isNewLine = e.EventType is ControllerEventType.Emergency or ControllerEventType.Stable or ControllerEventType.Trigger;
-                Console.Write(isNewLine ? "\n" : "");
-                Console.WriteLine(e.Message);
-                Console.ResetColor();
+            keyHandler.ToggleConfigRequested += () =>
+            {
+                dashboard.ToggleConfig();
             };
 
             // Setup graceful exit
-            Console.CancelKeyPress += (sender, e) =>
+            Console.CancelKeyPress += CancelKeyHandler;
+            void CancelKeyHandler(object? sender, ConsoleCancelEventArgs e)
             {
                 e.Cancel = true;
-                Console.WriteLine("\nExiting... Restoring Max Power.");
                 controller.Stop();
-            };
+                cancellationTokenSource.Cancel();
+            }
 
             try
             {
-                controller.RunAsync().Wait();
+                // Start dashboard first (it renders immediately with initial empty data)
+                dashboard.Start();
+                keyHandler.Start();
+
+                // Small delay to let dashboard initialize
+                Thread.Sleep(500);
+
+                // Then start the controller
+                controller.RunAsync(cancellationTokenSource.Token).Wait();
             }
             finally
             {
-                Console.WriteLine("Shutting down NVML...");
+                // Cleanup dashboard resources
+                keyHandler.Dispose();
+                dashboard.Dispose();
+                jsonPublisher.Dispose();
+                dataProvider.Dispose();
+
+                Console.WriteLine("\nShutting down NVML...");
                 NVML.nvmlShutdown();
             }
         }
