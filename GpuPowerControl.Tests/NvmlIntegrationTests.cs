@@ -1,5 +1,6 @@
 using GpuThermalController.Nvml;
 using Xunit;
+using Xunit.Sdk;
 
 namespace GpuPowerControl.Tests;
 
@@ -36,26 +37,21 @@ public class NvmlIntegrationTests
         }
     }
 
-    [Fact]
+    [SkippableFact]
     public void NvmlInitAndShutdown_RoundTripSucceeds()
     {
         int initResult = NVML.nvmlInit_v2();
-        if (initResult != 0)
-        {
-            return; // NVML not available, skip
-        }
+        Skip.If(initResult != 0, "NVML not available (no NVIDIA GPU/drivers)");
 
         int shutdownResult = NVML.nvmlShutdown();
         Assert.Equal(0, shutdownResult);
     }
 
-    [Fact]
+    [SkippableFact]
     public void GetDeviceCount_ReturnsAtLeastOne()
     {
-        if (!TryInitNVML())
-        {
-            return; // NVML not available, skip
-        }
+        bool nvmlAvailable = TryInitNVML();
+        Skip.If(!nvmlAvailable, "NVML not available (no NVIDIA GPU/drivers)");
 
         try
         {
@@ -69,13 +65,11 @@ public class NvmlIntegrationTests
         }
     }
 
-    [Fact]
+    [SkippableFact]
     public void GetDeviceHandleAndName_Succeeds()
     {
-        if (!TryInitNVML())
-        {
-            return; // NVML not available, skip
-        }
+        bool nvmlAvailable = TryInitNVML();
+        Skip.If(!nvmlAvailable, "NVML not available (no NVIDIA GPU/drivers)");
 
         try
         {
@@ -95,13 +89,11 @@ public class NvmlIntegrationTests
         }
     }
 
-    [Fact]
+    [SkippableFact]
     public void GetTemperature_ReturnsReasonableValue()
     {
-        if (!TryInitNVML())
-        {
-            return; // NVML not available, skip
-        }
+        bool nvmlAvailable = TryInitNVML();
+        Skip.If(!nvmlAvailable, "NVML not available (no NVIDIA GPU/drivers)");
 
         try
         {
@@ -118,13 +110,11 @@ public class NvmlIntegrationTests
         }
     }
 
-    [Fact]
+    [SkippableFact]
     public void GetPowerConstraints_ReturnsValidRange()
     {
-        if (!TryInitNVML())
-        {
-            return; // NVML not available, skip
-        }
+        bool nvmlAvailable = TryInitNVML();
+        Skip.If(!nvmlAvailable, "NVML not available (no NVIDIA GPU/drivers)");
 
         try
         {
@@ -142,13 +132,11 @@ public class NvmlIntegrationTests
         }
     }
 
-    [Fact]
+    [SkippableFact]
     public void GetDefaultPowerLimit_ReturnsValueWithinConstraints()
     {
-        if (!TryInitNVML())
-        {
-            return; // NVML not available, skip
-        }
+        bool nvmlAvailable = TryInitNVML();
+        Skip.If(!nvmlAvailable, "NVML not available (no NVIDIA GPU/drivers)");
 
         try
         {
@@ -170,13 +158,11 @@ public class NvmlIntegrationTests
         }
     }
 
-    [Fact]
+    [SkippableFact]
     public void SetPowerLimit_ChangesAndRestoresSafely()
     {
-        if (!TryInitNVML())
-        {
-            return; // NVML not available, skip
-        }
+        bool nvmlAvailable = TryInitNVML();
+        Skip.If(!nvmlAvailable, "NVML not available (no NVIDIA GPU/drivers)");
 
         IntPtr handle = IntPtr.Zero;
         uint originalLimit = 0;
@@ -194,21 +180,21 @@ public class NvmlIntegrationTests
             int currentResult = NVML.nvmlDeviceGetPowerManagementLimit(handle, out originalLimit);
             Assert.Equal(0, currentResult);
 
-            // Pick a safe test value: midpoint of range
-            uint testValue = minMw + (maxMw - minMw) / 2;
+            // Pick a value guaranteed to differ from the current limit
+            uint middle = minMw + (maxMw - minMw) / 2;
+            uint testValue = (originalLimit == middle) ? minMw : middle;
 
             // Set new power limit - gracefully skip if not permitted (requires admin)
             int setResult = NVML.nvmlDeviceSetPowerManagementLimit(handle, testValue);
-            if (setResult == NVML.NVML_ERROR_NOT_PERMITTED)
-            {
-                return; // Skip: requires admin privileges
-            }
+            Skip.If(setResult == NVML.NVML_ERROR_NOT_PERMITTED, "Requires admin privileges to set power limit");
+
             Assert.Equal(0, setResult);
             changed = true;
 
             // Verify it took
             int verifyResult = NVML.nvmlDeviceGetPowerManagementLimit(handle, out uint verifyMw);
             Assert.Equal(0, verifyResult);
+            Assert.NotEqual(originalLimit, verifyMw);
             Assert.Equal(testValue, verifyMw);
         }
         finally
