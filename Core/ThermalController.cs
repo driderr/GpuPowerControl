@@ -152,9 +152,13 @@ namespace GpuThermalController.Core
                     {
                         // Change too small to be meaningful - skip
                     }
+                    else if (newPower > _currentPowerLimit && currentTemp >= _config.TriggerTemp)
+                    {
+                        // Gate 2: Never increase power while at or above trigger temperature
+                    }
                     else
                     {
-                        // Gate 2: Minimum interval between adjustments (bypassed when temp rising fast)
+                        // Gate 3: Minimum interval between adjustments (bypassed when temp rising fast)
                         bool intervalOk = (TimeProvider() - _lastPowerChangeTime).TotalMilliseconds >= _config.MinAdjustmentIntervalMs;
                         bool intervalBypassed = derivative >= _config.IntervalBypassDerivative;
 
