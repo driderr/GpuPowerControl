@@ -175,9 +175,9 @@ namespace GpuThermalController
                         var filePath = $"data/export-{timestamp}.csv";
                         CsvExporter.ExportToCsv(events, filePath);
                     }
-                    catch
+                    catch (Exception ex)
                     {
-                        // Silently ignore export errors
+                        ErrorConsole.Error($"CSV export failed: {ex.Message}");
                     }
                 });
             };
