@@ -16,12 +16,16 @@ namespace GpuThermalController.Core
         private readonly TriggerEvaluator _triggerEvaluator;
         private readonly ThermalControllerConfig _config;
 
+        /// <summary>Time source for interval gating. Overridable for testing.</summary>
+        public Func<DateTimeOffset> TimeProvider { get; set; } = () => DateTimeOffset.Now;
+
         private bool _isControlling = false;
         private uint _lastKnownGoodTemp;
         private int _currentPowerLimit;
         private int _consecutiveReadFailures;
         private int _pidCycles;
         private int _stateTransitions;
+        private DateTimeOffset _lastPowerChangeTime;
         private CancellationTokenSource? _cts;
 
         public bool IsControlling => _isControlling;
@@ -56,6 +60,7 @@ namespace GpuThermalController.Core
             _consecutiveReadFailures = 0;
             _pidCycles = 0;
             _stateTransitions = 0;
+            _lastPowerChangeTime = DateTimeOffset.MinValue;
         }
 
         /// <summary>
@@ -136,10 +141,32 @@ namespace GpuThermalController.Core
 
                 if (newPower != _currentPowerLimit)
                 {
-                    SetPowerLimit(newPower);
-                    RaiseEvent(currentTemp, _currentPowerLimit, _isControlling,
-                        ControllerEventType.Info,
-                        $"[{DateTime.Now:HH:mm:ss}] Temp: {currentTemp}C | Target: {_config.TargetTemp}C | Limiting Power to: {newPower}W");
+                    // Gate 1: Minimum delta - only make meaningful changes
+                    int delta = Math.Abs(newPower - _currentPowerLimit);
+                    int requiredDelta = (currentTemp >= _config.TargetTemp - _config.NearTargetThreshold &&
+                                          currentTemp <= _config.TargetTemp + _config.NearTargetThreshold)
+                        ? _config.MinPowerDeltaNearW
+                        : _config.MinPowerDeltaFarW;
+
+                    if (delta < requiredDelta)
+                    {
+                        // Change too small to be meaningful - skip
+                    }
+                    else
+                    {
+                        // Gate 2: Minimum interval between adjustments (bypassed when temp rising fast)
+                        bool intervalOk = (TimeProvider() - _lastPowerChangeTime).TotalMilliseconds >= _config.MinAdjustmentIntervalMs;
+                        bool intervalBypassed = derivative >= _config.IntervalBypassDerivative;
+
+                        if (intervalOk || intervalBypassed)
+                        {
+                            SetPowerLimit(newPower);
+                            _lastPowerChangeTime = TimeProvider();
+                            RaiseEvent(currentTemp, _currentPowerLimit, _isControlling,
+                                ControllerEventType.Info,
+                                $"[{DateTime.Now:HH:mm:ss}] Temp: {currentTemp}C | Target: {_config.TargetTemp}C | Limiting Power to: {newPower}W");
+                        }
+                    }
                 }
 
                 // Exit condition: temp sufficiently below target AND power fully restored
