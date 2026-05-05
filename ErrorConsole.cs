@@ -8,8 +8,12 @@ namespace GpuThermalController;
 /// </summary>
 public static class ErrorConsole
 {
-    private static readonly IAnsiConsole _console = AnsiConsole.Create(
-        new AnsiConsoleSettings
+    /// <summary>
+    /// Creates an IAnsiConsole targeting the current Console.Error.
+    /// Created per-call so tests can redirect Console.Error before invoking.
+    /// </summary>
+    private static IAnsiConsole CreateConsole()
+        => AnsiConsole.Create(new AnsiConsoleSettings
         {
             Out = new AnsiConsoleOutput(Console.Error)
         });
@@ -18,11 +22,11 @@ public static class ErrorConsole
     /// Writes a warning message with a yellow icon and bold prefix.
     /// </summary>
     public static void Warning(string message)
-        => _console.MarkupLine($"[bold yellow]⚠ WARN:[/] {message}");
+        => CreateConsole().MarkupLine($"[bold yellow]⚠ WARN:[/] {message}");
 
     /// <summary>
     /// Writes an error message with a red icon and bold prefix.
     /// </summary>
     public static void Error(string message)
-        => _console.MarkupLine($"[bold red]✕ ERROR:[/] {message}");
+        => CreateConsole().MarkupLine($"[bold red]✕ ERROR:[/] {message}");
 }

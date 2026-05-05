@@ -29,6 +29,9 @@ public class KeyHandler : IDisposable
     /// <summary>Raised when the user toggles config display.</summary>
     public event Action? ToggleConfigRequested;
 
+    /// <summary>Raised when the user requests a test error output (for diagnostics).</summary>
+    public event Action? TestErrorRequested;
+
     public void Start()
     {
         _isRunning = true;
@@ -55,6 +58,9 @@ public class KeyHandler : IDisposable
                             break;
                         case ConsoleKey.H:
                             ToggleConfigRequested?.Invoke();
+                            break;
+                        case ConsoleKey.T:
+                            TestErrorRequested?.Invoke();
                             break;
                     }
                 }
