@@ -1,6 +1,7 @@
 using System.Text;
 using GpuThermalController.Interfaces;
 
+
 namespace GpuThermalController.Nvml
 {
     /// <summary>
@@ -41,14 +42,22 @@ namespace GpuThermalController.Nvml
             string name = result == 0 ? nameBuilder.ToString() : $"Device {index}";
 
             // Get power constraints
-            int minPower = 150; // Default fallback
-            int maxPower = 600; // Default fallback
+            int minPower;
+            int maxPower;
 
             result = NVML.nvmlDeviceGetPowerManagementLimitConstraints(handle, out uint minLimitMw, out uint maxLimitMw);
             if (result == 0)
             {
                 minPower = (int)(minLimitMw / 1000);
                 maxPower = (int)(maxLimitMw / 1000);
+            }
+            else
+            {
+                ErrorConsole.Warning(
+                    $"Cannot query power constraints for GPU {index} ({NVML.GetErrorMessage(result)}). " +
+                    $"Using fallback range: {NvmlDefaults.FallbackMinPowerWatts}W-{NvmlDefaults.FallbackMaxPowerWatts}W");
+                minPower = NvmlDefaults.FallbackMinPowerWatts;
+                maxPower = NvmlDefaults.FallbackMaxPowerWatts;
             }
 
             return new NvmlGpuDevice(index, handle, name, minPower, maxPower);

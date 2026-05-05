@@ -68,9 +68,9 @@ public class ConsoleDashboard : IDisposable
                             var renderables = RenderFrame();
                             ctx.UpdateTarget(new Rows(renderables));
                         }
-                        catch
+                        catch (Exception ex)
                         {
-                            // Ignore render errors
+                            ErrorConsole.Error($"Dashboard render failed: {ex.Message}");
                         }
 
                         Thread.Sleep(250);
