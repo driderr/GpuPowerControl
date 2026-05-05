@@ -363,4 +363,183 @@ public class ThermalControllerTests
         Assert.NotNull(triggerEvent);
         Assert.True(triggerEvent.IsControlling);
     }
+
+    // === TEST 16: OnStep Event ===
+
+    [Fact]
+    public void Step_FiresOnStepEvent()
+    {
+        var (controller, device, events) = CreateController();
+
+        bool fired = false;
+        ThermalController.StepEventArgs? captured = null;
+
+        controller.OnStep += (_, e) =>
+        {
+            fired = true;
+            captured = e;
+        };
+
+        controller.Step(60);
+
+        Assert.True(fired);
+        Assert.NotNull(captured);
+        Assert.Equal(60u, captured.Temperature);
+        Assert.False(captured.IsControlling);
+    }
+
+    [Fact]
+    public void Step_OnStepEvent_ReportsControllingAfterTrigger()
+    {
+        var (controller, device, events) = CreateController();
+
+        ThermalController.StepEventArgs? lastStep = null;
+        controller.OnStep += (_, e) => lastStep = e;
+
+        controller.Step(60);  // idle
+        Assert.False(lastStep.IsControlling);
+
+        controller.Step(85);  // trigger
+        Assert.True(lastStep.IsControlling);
+    }
+
+    [Fact]
+    public void Step_OnStepEvent_ReportsDerivative()
+    {
+        var (controller, device, events) = CreateController();
+
+        ThermalController.StepEventArgs? lastStep = null;
+        controller.OnStep += (_, e) => lastStep = e;
+
+        controller.Step(60);  // first step, derivative from 75 default
+        controller.Step(70);  // 10 degree rise
+
+        Assert.NotEqual(0, lastStep.Derivative);
+    }
+
+    // === TEST 17: PidCycles Counter ===
+
+    [Fact]
+    public void Step_PidCycles_IncrementsWhenControlling()
+    {
+        var (controller, device, events) = CreateController();
+
+        Assert.Equal(0, controller.PidCycles);
+
+        controller.Step(60);  // idle, no PID cycles
+        Assert.Equal(0, controller.PidCycles);
+
+        controller.Step(85);  // trigger + 1 PID cycle
+        Assert.True(controller.PidCycles >= 1);
+
+        int cyclesBefore = controller.PidCycles;
+        controller.Step(85);  // another PID cycle
+        Assert.True(controller.PidCycles > cyclesBefore);
+    }
+
+    [Fact]
+    public void Step_PidCycles_DoesNotIncrementWhenIdle()
+    {
+        var (controller, device, events) = CreateController();
+
+        for (int i = 0; i < 10; i++)
+            controller.Step(40);
+
+        Assert.Equal(0, controller.PidCycles);
+    }
+
+    // === TEST 18: StateTransitions Counter ===
+
+    [Fact]
+    public void Step_StateTransitions_IncrementsOnTrigger()
+    {
+        var (controller, device, events) = CreateController();
+
+        Assert.Equal(0, controller.StateTransitions);
+
+        controller.Step(85);  // idle -> controlling
+        Assert.True(controller.StateTransitions >= 1);
+    }
+
+    [Fact]
+    public void Step_StateTransitions_IncrementsOnExit()
+    {
+        var (controller, device, events) = CreateController();
+
+        controller.Step(85);  // trigger
+        Assert.True(controller.StateTransitions >= 1);
+
+        int transitionsBefore = controller.StateTransitions;
+
+        // Cool down and restore power
+        for (int i = 0; i < 25; i++)
+            controller.Step(70);
+
+        // Should have transitioned back at least once more (controlling -> idle)
+        // Total transitions should be >= 2
+        Assert.True(controller.StateTransitions >= 2);
+    }
+
+    [Fact]
+    public void Step_StateTransitions_ZeroInitially()
+    {
+        var (controller, device, events) = CreateController();
+        Assert.Equal(0, controller.StateTransitions);
+    }
+
+    // === TEST 19: ConsecutiveReadFailures Counter ===
+
+    [Fact]
+    public void Step_ConsecutiveReadFailures_IncrementsOnFailure()
+    {
+        var (controller, device, events) = CreateController();
+        device.SetConstantTemperature(60);
+
+        controller.Step(60);  // successful read
+        Assert.Equal(0, controller.ConsecutiveReadFailures);
+
+        // Now make reads fail
+        device.GetTemperatureShouldFail = true;
+        controller.Step();  // read fails
+        Assert.True(controller.ConsecutiveReadFailures >= 1);
+    }
+
+    [Fact]
+    public void Step_ConsecutiveReadFailures_ResetsOnSuccess()
+    {
+        var (controller, device, events) = CreateController();
+        device.SetConstantTemperature(60);
+
+        // Fail a few reads (no simulated temp so it reads from device)
+        device.GetTemperatureShouldFail = true;
+        for (int i = 0; i < 3; i++)
+            controller.Step();
+
+        Assert.True(controller.ConsecutiveReadFailures > 0);
+
+        // Successful read resets counter (no simulated temp so it reads from device)
+        device.GetTemperatureShouldFail = false;
+        controller.Step();
+
+        Assert.Equal(0, controller.ConsecutiveReadFailures);
+    }
+
+    [Fact]
+    public void Step_ConsecutiveReadFailures_ZeroInitially()
+    {
+        var (controller, device, events) = CreateController();
+        Assert.Equal(0, controller.ConsecutiveReadFailures);
+    }
+
+    // === TEST 20: Config Property ===
+
+    [Fact]
+    public void Config_ExposesControllerConfig()
+    {
+        var (controller, device, events) = CreateController();
+
+        Assert.NotNull(controller.Config);
+        Assert.Equal(75, (int)controller.Config.TargetTemp);
+        Assert.Equal(80, (int)controller.Config.TriggerTemp);
+    }
 }
