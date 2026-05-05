@@ -86,6 +86,9 @@ public class ConsoleDashboard : IDisposable
 
     private List<IRenderable> RenderFrame()
     {
+        // Drain pending errors from ErrorConsole so they render inside the Live display
+        var pendingErrors = ErrorConsole.DrainPending();
+
         var config = _provider.Config;
         var current = _provider.Current;
 
@@ -211,7 +214,7 @@ public class ConsoleDashboard : IDisposable
         // === EVENT LOG (full width, below everything) ===
         var events = _provider.GetEvents(23);
         renderables.Add(new Text("\n"));
-        renderables.Add(BuildLogContent(events));
+        renderables.Add(BuildLogContent(events, pendingErrors));
 
         // === FOOTER ===
         renderables.Add(new Text("\n"));
@@ -335,7 +338,7 @@ public class ConsoleDashboard : IDisposable
     }
 
     /// <summary>Builds the event log content as a Rows renderable.</summary>
-    private IRenderable BuildLogContent(IReadOnlyList<DashboardEvent> events)
+    private IRenderable BuildLogContent(IReadOnlyList<DashboardEvent> events, List<ErrorEntry> pendingErrors)
     {
         var items = new List<IRenderable>();
         items.Add(new Rule("[bold]Event Log[/]"));
@@ -346,7 +349,22 @@ public class ConsoleDashboard : IDisposable
             return new Rows(items);
         }
 
-        if (events.Count == 0)
+        // Render pending ErrorConsole entries first (they appear in the Live display)
+        foreach (var err in pendingErrors)
+        {
+            var color = err.Level switch
+            {
+                "ERROR" => Color.Red,
+                "WARN" => Color.Yellow,
+                _ => Color.Gray
+            };
+            var msg = Markup.Escape(err.Message);
+            var timeStr = err.Timestamp.ToString("HH:mm:ss");
+            var icon = err.Level switch { "ERROR" => "\u2715", "WARN" => "\u26A0", _ => "?" };
+            items.Add(new Markup($"{timeStr} [{color}]{icon} {err.Level}: {msg}[/]"));
+        }
+
+        if (events.Count == 0 && pendingErrors.Count == 0)
         {
             items.Add(new Markup("[dim]No events[/]"));
             return new Rows(items);
