@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Security.Principal;
 using System.Threading;
+using Spectre.Console;
 using GpuThermalController.Core;
 using GpuThermalController.Dashboard;
 using GpuThermalController.Interfaces;
@@ -199,6 +200,39 @@ namespace GpuThermalController
             {
                 ErrorConsole.Error("Test error triggered (press T during runtime)");
                 ErrorConsole.Warning("Test warning triggered (press T during runtime)");
+            };
+
+            // PID coefficient adjustment (press P during dashboard)
+            keyHandler.AdjustPidRequested += () =>
+            {
+                // Pause dashboard Live display so TextPrompt can safely use the console
+                dashboard.Pause();
+                try
+                {
+                    AnsiConsole.MarkupLine("");
+                    AnsiConsole.MarkupLine("[bold cyan]Adjust PID Coefficients[/] [gray](press Enter to keep current value)[/]");
+
+                    var newKp = AnsiConsole.Ask<double>($"  Kp [gray](current: {config.Kp:F1})[/]:", config.Kp);
+                    var newKi = AnsiConsole.Ask<double>($"  Ki [gray](current: {config.Ki:F1})[/]:", config.Ki);
+                    var newKd = AnsiConsole.Ask<double>($"  Kd [gray](current: {config.Kd:F1})[/]:", config.Kd);
+
+                    // Update the PID controller (also resets integral to prevent windup)
+                    pidController.SetCoefficients(newKp, newKi, newKd);
+
+                    // Keep config in sync
+                    config.Kp = newKp;
+                    config.Ki = newKi;
+                    config.Kd = newKd;
+
+                    // Update dashboard config display
+                    dataProvider.UpdatePidCoefficients(newKp, newKi, newKd);
+
+                    AnsiConsole.MarkupLine($"[green]PID updated: Kp={newKp:F1}, Ki={newKi:F1}, Kd={newKd:F1}[/]");
+                }
+                finally
+                {
+                    dashboard.Resume();
+                }
             };
 
             // Setup graceful exit

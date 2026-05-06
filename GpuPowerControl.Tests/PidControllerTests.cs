@@ -259,4 +259,72 @@ public class PidControllerTests
 
         Assert.Equal(150, result); // Should be clamped to minimum
     }
+
+    // --- Runtime Coefficient Adjustment Tests ---
+
+    [Fact]
+    public void SetCoefficients_UpdatesAllGains()
+    {
+        var controller = CreateController(kp: 10.0, ki: 0, kd: 0);
+        controller.SetCoefficients(20.0, 1.0, 5.0);
+
+        Assert.Equal(20.0, controller.Kp);
+        Assert.Equal(1.0, controller.Ki);
+        Assert.Equal(5.0, controller.Kd);
+    }
+
+    [Fact]
+    public void SetCoefficients_ResetsIntegral()
+    {
+        var controller = CreateController(kp: 0, ki: 1.0, kd: 0);
+        // Accumulate some integral
+        controller.CalculatePowerLimit(80, 80, 0.25);
+        Assert.True(controller.Integral > 0);
+
+        controller.SetCoefficients(10.0, 2.0, 5.0);
+        Assert.Equal(0, controller.Integral);
+    }
+
+    [Fact]
+    public void SetCoefficients_NewGainsUsedInNextCalculation()
+    {
+        var controller = CreateController(kp: 10.0, ki: 0, kd: 0);
+        // Error = 5, P = 10 * 5 = 50, power = 600 - 50 = 550
+        int result1 = controller.CalculatePowerLimit(80, 80, 0.25);
+        Assert.Equal(550, result1);
+
+        controller.SetCoefficients(20.0, 0, 0);
+        // Error = 5, P = 20 * 5 = 100, power = 600 - 100 = 500
+        int result2 = controller.CalculatePowerLimit(80, 80, 0.25);
+        Assert.Equal(500, result2);
+    }
+
+    [Fact]
+    public void IndividualCoefficientProperties_AreSettable()
+    {
+        var controller = CreateController(kp: 10.0, ki: 0.5, kd: 2.5);
+
+        controller.Kp = 15.0;
+        controller.Ki = 1.0;
+        controller.Kd = 5.0;
+
+        Assert.Equal(15.0, controller.Kp);
+        Assert.Equal(1.0, controller.Ki);
+        Assert.Equal(5.0, controller.Kd);
+    }
+
+    [Fact]
+    public void IndividualCoefficientChange_DoesNotResetIntegral()
+    {
+        var controller = CreateController(kp: 0, ki: 1.0, kd: 0);
+        // Accumulate some integral
+        controller.CalculatePowerLimit(80, 80, 0.25);
+        double integralBefore = controller.Integral;
+        Assert.True(integralBefore > 0);
+
+        // Setting individual properties does NOT reset integral
+        controller.Kp = 10.0;
+
+        Assert.Equal(integralBefore, controller.Integral);
+    }
 }

@@ -42,7 +42,7 @@ public class ConsoleDashboard : IDisposable
     private static readonly Text sBlankLine = new("");
 
     // === Footer text (never changes) ===
-    private static readonly Markup sFooterMarkup = new("[gray]Q:Quit  L:Toggle Log  J:Toggle JSON  E:Export CSV  H:Toggle Config  T:Test Error[/]");
+    private static readonly Markup sFooterMarkup = new("[gray]Q:Quit  L:Log  J:JSON  E:CSV  H:Config  P:PID  T:TestErr[/]");
 
     // === Pre-created structural widgets ===
     // Note: Panels and Grids cannot be mutated (no Content property, no Rows.Clear),
@@ -100,7 +100,28 @@ public class ConsoleDashboard : IDisposable
         }
 
         _isRunning = true;
+        StartRenderThread();
+    }
 
+    /// <summary>Pause the dashboard display. Stops the Live display so prompts can be used.</summary>
+    public void Pause()
+    {
+        _isRunning = false;
+        var thread = _renderThread;
+        _renderThread = null;
+        thread?.Join(2000);
+    }
+
+    /// <summary>Resume the dashboard display after a Pause().</summary>
+    public void Resume()
+    {
+        if (System.Console.IsOutputRedirected) return;
+        _isRunning = true;
+        StartRenderThread();
+    }
+
+    private void StartRenderThread()
+    {
         _renderThread = new Thread(() =>
         {
             _console.Live(new Rows())

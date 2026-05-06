@@ -32,6 +32,9 @@ public class KeyHandler : IDisposable
     /// <summary>Raised when the user requests a test error output (for diagnostics).</summary>
     public event Action? TestErrorRequested;
 
+    /// <summary>Raised when the user requests to adjust PID coefficients.</summary>
+    public event Action? AdjustPidRequested;
+
     public void Start()
     {
         _isRunning = true;
@@ -59,9 +62,12 @@ public class KeyHandler : IDisposable
                         case ConsoleKey.H:
                             ToggleConfigRequested?.Invoke();
                             break;
-                        case ConsoleKey.T:
-                            TestErrorRequested?.Invoke();
-                            break;
+                    case ConsoleKey.T:
+                        TestErrorRequested?.Invoke();
+                        break;
+                    case ConsoleKey.P:
+                        AdjustPidRequested?.Invoke();
+                        break;
                     }
                 }
                 Thread.Sleep(50);
