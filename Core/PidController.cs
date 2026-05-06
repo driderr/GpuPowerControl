@@ -13,9 +13,6 @@ namespace GpuThermalController.Core
     /// </summary>
     public class PidController
     {
-        private readonly double _kp;
-        private readonly double _ki;
-        private readonly double _kd;
         private readonly int _maxPower;
         private readonly int _minPower;
         private readonly uint _targetTemp;
@@ -23,6 +20,15 @@ namespace GpuThermalController.Core
         private readonly double _integralMin;
         private readonly double _integralBand;
         private readonly double _minimumDt;
+
+        /// <summary>Proportional gain. Can be adjusted at runtime.</summary>
+        public double Kp { get; set; }
+
+        /// <summary>Integral gain. Can be adjusted at runtime.</summary>
+        public double Ki { get; set; }
+
+        /// <summary>Derivative gain. Can be adjusted at runtime.</summary>
+        public double Kd { get; set; }
 
         /// <summary>Current accumulated integral value (exposed for testing and state management).</summary>
         public double Integral { get; private set; }
@@ -42,9 +48,9 @@ namespace GpuThermalController.Core
             double integralBand,
             double minimumDt)
         {
-            _kp = kp;
-            _ki = ki;
-            _kd = kd;
+            Kp = kp;
+            Ki = ki;
+            Kd = kd;
             _targetTemp = targetTemp;
             _maxPower = maxPower;
             _minPower = minPower;
@@ -70,7 +76,7 @@ namespace GpuThermalController.Core
             double error = currentTemp - _targetTemp;
 
             // Proportional term
-            double P = _kp * error;
+            double P = Kp * error;
 
             // Conditional integration: only accumulate when near target.
             // When far from target, P handles the large error and D handles the rate of change.
@@ -86,11 +92,11 @@ namespace GpuThermalController.Core
                 if (Integral > _integralMax) Integral = _integralMax;
                 if (Integral < _integralMin) Integral = _integralMin;
             }
-            double I = _ki * Integral;
+            double I = Ki * Integral;
 
             // Derivative term (only when temperature is rising)
             double derivative = (currentTemp - lastTemp) / dt;
-            double D = (derivative > 0) ? (_kd * derivative) : 0;
+            double D = (derivative > 0) ? (Kd * derivative) : 0;
 
             // Store components for dashboard
             LastComponents = new PidComponents(P, I, D, error, derivative);
@@ -113,6 +119,18 @@ namespace GpuThermalController.Core
         {
             Integral = 0;
             LastComponents = null;
+        }
+
+        /// <summary>
+        /// Updates all PID coefficients at runtime and resets the integral accumulator.
+        /// Resetting the integral is required to prevent output windup when gains change.
+        /// </summary>
+        public void SetCoefficients(double kp, double ki, double kd)
+        {
+            Kp = kp;
+            Ki = ki;
+            Kd = kd;
+            Reset();
         }
     }
 }

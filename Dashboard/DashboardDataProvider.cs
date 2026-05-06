@@ -168,6 +168,18 @@ public class DashboardDataProvider : IDashboardDataProvider
         }
     }
 
+    /// <summary>
+    /// Updates the PID coefficients in the dashboard config snapshot.
+    /// Call this when the user adjusts Kp/Ki/Kd from the dashboard.
+    /// </summary>
+    public void UpdatePidCoefficients(double kp, double ki, double kd)
+    {
+        lock (_lock)
+        {
+            _config = _config with { Kp = kp, Ki = ki, Kd = kd };
+        }
+    }
+
     public void Dispose()
     {
         // No unmanaged resources to dispose
