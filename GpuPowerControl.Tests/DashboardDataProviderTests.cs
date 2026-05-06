@@ -53,7 +53,7 @@ public class DashboardDataProviderTests
         config ??= CreateConfig();
 
         var pid = new PidController(config.Kp, config.Ki, config.Kd, config.TargetTemp, device.MaxPower, device.MinPower,
-            config.IntegralMax, config.IntegralMin, config.MinimumDt);
+            config.IntegralMax, config.IntegralMin, config.IntegralBand, config.MinimumDt);
         var trigger = new TriggerEvaluator(config.TriggerTemp, config.PredictiveFloor, config.LookaheadSeconds);
         var controller = new ThermalController(device, pid, trigger, config);
         var provider = new DashboardDataProvider(device, config, historyCapacity, eventCapacity);
@@ -363,7 +363,7 @@ public class DashboardDataProviderTests
         device.SetConstantTemperature(60);
         var config = CreateConfig();
         var pid = new PidController(config.Kp, config.Ki, config.Kd, config.TargetTemp, device.MaxPower, device.MinPower,
-            config.IntegralMax, config.IntegralMin, config.MinimumDt);
+            config.IntegralMax, config.IntegralMin, config.IntegralBand, config.MinimumDt);
         var trigger = new TriggerEvaluator(config.TriggerTemp, config.PredictiveFloor, config.LookaheadSeconds);
         var controller = new ThermalController(device, pid, trigger, config);
         var provider = new DashboardDataProvider(device, config);

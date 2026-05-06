@@ -19,6 +19,9 @@ namespace GpuThermalController.Core
         public double IntegralMax { get; set; } = 250;
         public double IntegralMin { get; set; } = -50;
 
+        // Conditional integration: only accumulate integral within this band around target
+        public double IntegralBand { get; set; } = 5; // °C — reset integral when |error| exceeds this
+
         // Timing
         public double DefaultDt { get; set; } = 0.25;
         public double MinimumDt { get; set; } = 0.001;

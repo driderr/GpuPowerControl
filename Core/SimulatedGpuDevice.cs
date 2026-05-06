@@ -4,7 +4,9 @@ using GpuThermalController.Interfaces;
 namespace GpuThermalController.Core
 {
     /// <summary>
-    /// Preset temperature scenarios for simulated GPU operation.
+    /// Preset workload profiles for simulated GPU operation.
+    /// Each profile defines a target temperature the workload "wants" to reach
+    /// when running at full power (600W).
     /// </summary>
     public enum SimulationScenario
     {
@@ -28,9 +30,20 @@ namespace GpuThermalController.Core
     }
 
     /// <summary>
-    /// Simulated GPU device that generates realistic, time-varying temperature readings.
-    /// Temperature reacts to power limit changes: reducing power causes cooling,
-    /// restoring power allows temperatures to rise again.
+    /// Simulated GPU device with a physics-based thermal mass model.
+    /// 
+    /// Temperature evolves based on:
+    ///   dT/dt = (PowerGenerated - PowerDissipated) / ThermalCapacity
+    /// 
+    /// Where:
+    ///   - PowerGenerated = workload intensity * (currentPowerLimit / maxPower)
+    ///   - PowerDissipated = thermalConductance * (currentTemp - ambientTemp)
+    ///   - ThermalCapacity determines how fast temperature changes (thermal inertia)
+    /// 
+    /// This means:
+    ///   - Reducing power actually cools the GPU (with realistic thermal lag)
+    ///   - Temperature cannot jump instantaneously (thermal mass absorbs energy)
+    ///   - At equilibrium, power generated equals power dissipated
     /// </summary>
     public class SimulatedGpuDevice : IGpuDevice
     {
@@ -38,13 +51,19 @@ namespace GpuThermalController.Core
         private readonly DateTime _startTime;
         private readonly SimulatedGpuConfig _config;
 
-        // Power reactivity state
+        // Power state
         private int _currentPowerLimit;
         private readonly int _minPower;
         private readonly int _maxPower;
 
-        // Temperature state
+        // Thermal model state
         private double _currentTemp;
+        private DateTime _lastUpdateTime;
+
+        // Thermal model parameters
+        private const double AmbientTemp = 25.0;        // Room temperature in °C
+        private const double ThermalConductance = 8.0;  // W/°C — how fast heat escapes to ambient
+        private const double ThermalCapacity = 75.0;    // J/°C — thermal inertia (lower = faster temp changes, more responsive)
 
         public string Name { get; }
         public int MinPower => _minPower;
@@ -60,6 +79,7 @@ namespace GpuThermalController.Core
                 ? new Random(_config.Seed.Value)
                 : new Random();
             _startTime = DateTime.UtcNow;
+            _lastUpdateTime = _startTime;
 
             _minPower = 150;
             _maxPower = 600;
@@ -67,7 +87,7 @@ namespace GpuThermalController.Core
 
             Name = "Simulated RTX 4090";
 
-            // Initialize temperature based on scenario base
+            // Initialize temperature at idle (near base temp)
             _currentTemp = GetBaseTemp();
         }
 
@@ -75,7 +95,6 @@ namespace GpuThermalController.Core
         {
             // Always succeed in simulation
             double simulated = CalculateTemperature();
-            _currentTemp = simulated;
             temperature = (uint)Math.Max(0, Math.Round(simulated));
             return true;
         }
@@ -90,51 +109,88 @@ namespace GpuThermalController.Core
 
         private double CalculateTemperature()
         {
-            double elapsedSeconds = (DateTime.UtcNow - _startTime).TotalSeconds;
+            DateTime now = DateTime.UtcNow;
+            double dt = (now - _lastUpdateTime).TotalSeconds;
+            _lastUpdateTime = now;
+
+            // Guard against negative or zero dt
+            if (dt <= 0) dt = 0.01;
+            if (dt > 5) dt = 5; // Cap at 5 seconds to prevent huge jumps
+
+            // 1. Get workload intensity (0.0 to 1.0) based on scenario and elapsed time
+            double elapsed = (now - _startTime).TotalSeconds;
+            double workloadIntensity = GetWorkloadIntensity(elapsed);
+
+            // 2. Calculate actual power being dissipated as heat
+            // The workload generates heat proportional to the power limit.
+            // At full power limit with full workload, GPU generates max heat.
+            // At reduced power limit, less heat is generated.
+            double powerRatio = (double)_currentPowerLimit / _maxPower;
+            double powerGenerated = workloadIntensity * powerRatio * _maxPower; // Watts
+
+            // 3. Calculate heat dissipation (Newton's law of cooling)
+            // Heat flows from GPU to ambient proportional to temperature difference
+            double tempDiff = _currentTemp - AmbientTemp;
+            double powerDissipated = ThermalConductance * tempDiff; // Watts
+
+            // 4. Calculate temperature change: dT = (powerIn - powerOut) * dt / capacity
+            double netPower = powerGenerated - powerDissipated;
+            double dT = (netPower * dt) / ThermalCapacity;
+
+            // 5. Apply temperature change
+            _currentTemp += dT;
+
+            // 6. Add small noise for realism (±0.2°C)
+            double noise = (_random.NextDouble() - 0.5) * 0.4;
+            double result = _currentTemp + noise;
+
+            // 7. Clamp to reasonable range
+            return Math.Clamp(result, AmbientTemp, 110);
+        }
+
+        /// <summary>
+        /// Returns workload intensity (0.0 to 1.0) based on scenario and elapsed time.
+        /// Workload intensity represents how much computational load the GPU is under
+        /// at full power. The actual heat generated is scaled by the power limit.
+        /// </summary>
+        private double GetWorkloadIntensity(double elapsed)
+        {
             double baseTemp = GetBaseTemp();
             double peakTemp = GetPeakTemp();
 
-            // Power factor: 0.0 (min power, max cooling) to 1.0 (max power, no cooling effect)
-            double powerFactor = (double)(_currentPowerLimit - _minPower) / (_maxPower - _minPower);
+            // The peakTemp represents what the GPU would reach at full power (600W)
+            // with full workload. We can reverse-calculate the workload intensity that
+            // would produce this equilibrium temperature.
+            // At equilibrium: powerGenerated = powerDissipated
+            // workload * maxPower = conductance * (peakTemp - ambient)
+            // workload = conductance * (peakTemp - ambient) / maxPower
+            double maxWorkloadIntensity = ThermalConductance * (peakTemp - AmbientTemp) / _maxPower;
 
-            double scenarioTemp = ScenarioTemperature(elapsedSeconds, baseTemp, peakTemp);
+            // Get scenario-based intensity multiplier (0.0 to 1.0)
+            double scenarioMultiplier = GetScenarioMultiplier(elapsed, baseTemp, peakTemp);
 
-            // Power reactivity: when power is reduced, push temperature downward
-            // When power is at max, no cooling effect (workload generates full heat)
-            // The cooling effect is gradual - simulates thermal mass
-            double coolingEffect = (1.0 - powerFactor) * (scenarioTemp - baseTemp) * 0.6;
-            double result = scenarioTemp - coolingEffect;
-
-            // Add small noise for realism (±0.3°C)
-            double noise = (_random.NextDouble() - 0.5) * 0.6;
-            result += noise;
-
-            // Clamp to reasonable range
-            return Math.Clamp(result, baseTemp - 5, peakTemp + 5);
+            return maxWorkloadIntensity * scenarioMultiplier;
         }
 
-        private double ScenarioTemperature(double elapsed, double baseTemp, double peakTemp)
+        private double GetScenarioMultiplier(double elapsed, double baseTemp, double peakTemp)
         {
             return _config.Scenario switch
             {
-                SimulationScenario.Idle => ScenarioIdle(elapsed, baseTemp, peakTemp),
-                SimulationScenario.Spike => ScenarioSpike(elapsed, baseTemp, peakTemp),
-                SimulationScenario.SustainedLoad => ScenarioSustainedLoad(elapsed, baseTemp, peakTemp),
-                SimulationScenario.Emergency => ScenarioEmergency(elapsed, baseTemp, peakTemp),
-                SimulationScenario.GradualWarmup => ScenarioGradualWarmup(elapsed, baseTemp, peakTemp),
-                _ => ScenarioDefault(elapsed, baseTemp, peakTemp),
+                SimulationScenario.Idle => ScenarioIdleMultiplier(elapsed),
+                SimulationScenario.Spike => ScenarioSpikeMultiplier(elapsed),
+                SimulationScenario.SustainedLoad => ScenarioSustainedLoadMultiplier(elapsed),
+                SimulationScenario.Emergency => ScenarioEmergencyMultiplier(elapsed),
+                SimulationScenario.GradualWarmup => ScenarioGradualWarmupMultiplier(elapsed),
+                _ => ScenarioDefaultMultiplier(elapsed),
             };
         }
 
         /// <summary>
         /// Default: rich variety of patterns cycling over ~5 minutes.
-        /// Idle → gradual warm-up → load spikes → cool-down → occasional emergency spike.
         /// </summary>
-        private double ScenarioDefault(double elapsed, double baseTemp, double peakTemp)
+        private double ScenarioDefaultMultiplier(double elapsed)
         {
-            double range = peakTemp - baseTemp;
-
-            // Layer 1: Slow 3-minute cycle (idle to moderate load)
+            // Layer 1: Slow 3-minute cycle
             double slowCycle = Math.Sin(elapsed / 300.0 * Math.PI * 2) * 0.3;
 
             // Layer 2: Medium 60-second load pattern
@@ -143,12 +199,11 @@ namespace GpuThermalController.Core
             // Layer 3: Fast 10-second micro-variations
             double fastCycle = Math.Sin(elapsed / 10.0 * Math.PI * 2) * 0.1;
 
-            // Layer 4: Periodic spike every ~90 seconds (sharp, short)
+            // Layer 4: Periodic spike every ~90 seconds
             double spikePhase = (elapsed % 90.0) / 90.0;
             double spike = 0;
             if (spikePhase > 0.7 && spikePhase < 0.85)
             {
-                // Rising edge of spike
                 double spikeProgress = (spikePhase - 0.7) / 0.15;
                 spike = Math.Sin(spikeProgress * Math.PI) * 0.35;
             }
@@ -163,112 +218,99 @@ namespace GpuThermalController.Core
             }
 
             double combined = slowCycle + mediumCycle + fastCycle + spike + emergency;
-            // Normalize to 0-1 range (worst case sum ≈ 1.1, so divide by 1.1)
-            double normalized = Math.Clamp(combined / 1.1, 0, 1);
-
-            return baseTemp + range * normalized;
+            return Math.Clamp(combined / 1.1 + 0.5, 0, 1); // Center around 0.5
         }
 
         /// <summary>
-        /// Idle: stays around baseTemp with small fluctuations. Never triggers control.
+        /// Idle: low workload, stays cool.
         /// </summary>
-        private double ScenarioIdle(double elapsed, double baseTemp, double peakTemp)
+        private double ScenarioIdleMultiplier(double elapsed)
         {
-            // Stay within baseTemp ± 5°C
-            double fluctuation = Math.Sin(elapsed / 8.0 * Math.PI * 2) * 3;
-            fluctuation += Math.Sin(elapsed / 3.0 * Math.PI * 2) * 1.5;
-            return baseTemp + fluctuation;
+            // Small fluctuations around 0.15 intensity
+            double fluctuation = Math.Sin(elapsed / 8.0 * Math.PI * 2) * 0.05;
+            return Math.Clamp(0.15 + fluctuation, 0, 1);
         }
 
         /// <summary>
-        /// Spike: quick temperature spike from base to peak in ~10 seconds, then cooldown.
-        /// Repeats every 30 seconds.
+        /// Spike: ramp to full workload, hold, then cooldown.
+        /// Repeats every 45 seconds (15s rising + 10s hold + 20s cooling).
         /// </summary>
-        private double ScenarioSpike(double elapsed, double baseTemp, double peakTemp)
+        private double ScenarioSpikeMultiplier(double elapsed)
         {
-            double range = peakTemp - baseTemp;
-            double cyclePhase = (elapsed % 30.0) / 30.0;
+            double cyclePhase = (elapsed % 45.0) / 45.0;
 
-            if (cyclePhase < 0.3)
+            if (cyclePhase < 0.33)
             {
-                // Rising: 0-30% of cycle = rapid climb
-                double progress = cyclePhase / 0.3;
-                return baseTemp + range * Math.Sin(progress * Math.PI * 0.5);
+                // Rising: 15s ramp to full workload
+                double progress = cyclePhase / 0.33;
+                return Math.Sin(progress * Math.PI * 0.5);
             }
-            else if (cyclePhase < 0.5)
+            else if (cyclePhase < 0.56)
             {
-                // Hold near peak briefly
-                return peakTemp - range * 0.05;
+                // Hold near full workload for ~10s
+                return 0.95;
             }
             else
             {
-                // Cooling: 50-100% of cycle = gradual cooldown
-                double progress = (cyclePhase - 0.5) / 0.5;
-                return peakTemp - range * 0.95 * (1.0 - Math.Cos(progress * Math.PI * 0.5));
+                // Cooling: 20s cooldown to zero workload
+                double progress = (cyclePhase - 0.56) / 0.44;
+                return 1.0 - (1.0 - Math.Cos(progress * Math.PI * 0.5));
             }
         }
 
         /// <summary>
-        /// Sustained load: gradually warms to peak and stays there for 30+ seconds.
+        /// Sustained load: gradually ramps to full workload and stays there.
         /// </summary>
-        private double ScenarioSustainedLoad(double elapsed, double baseTemp, double peakTemp)
+        private double ScenarioSustainedLoadMultiplier(double elapsed)
         {
-            double range = peakTemp - baseTemp;
-
             if (elapsed < 15)
             {
-                // Warm-up phase: 15 seconds to reach peak
+                // Warm-up: 15 seconds to reach full workload
                 double progress = elapsed / 15.0;
-                return baseTemp + range * (1.0 - Math.Cos(progress * Math.PI * 0.5));
+                return 1.0 - Math.Cos(progress * Math.PI * 0.5);
             }
             else
             {
-                // Sustained: hover around peak with small fluctuations
-                double fluctuation = Math.Sin(elapsed / 5.0 * Math.PI * 2) * 1.5;
-                return peakTemp + fluctuation;
+                // Sustained: full workload with small fluctuations
+                double fluctuation = Math.Sin(elapsed / 5.0 * Math.PI * 2) * 0.03;
+                return Math.Clamp(1.0 + fluctuation, 0, 1);
             }
         }
 
         /// <summary>
-        /// Emergency: rapidly climbs to emergency territory (95°C) then holds.
+        /// Emergency: rapidly ramps to extreme workload.
         /// </summary>
-        private double ScenarioEmergency(double elapsed, double baseTemp, double peakTemp)
+        private double ScenarioEmergencyMultiplier(double elapsed)
         {
-            double emergencyTemp = Math.Max(peakTemp, 95.0);
-            double range = emergencyTemp - baseTemp;
-
             if (elapsed < 8)
             {
-                // Rapid climb in 8 seconds
+                // Rapid climb — accelerating workload
                 double progress = elapsed / 8.0;
-                return baseTemp + range * progress * progress; // Accelerating
+                return progress * progress;
             }
             else
             {
-                // Hold near emergency temp
-                double fluctuation = Math.Sin(elapsed / 2.0 * Math.PI * 2) * 1;
-                return emergencyTemp + fluctuation;
+                // Hold near maximum workload
+                double fluctuation = Math.Sin(elapsed / 2.0 * Math.PI * 2) * 0.02;
+                return Math.Clamp(1.0 + fluctuation, 0, 1);
             }
         }
 
         /// <summary>
-        /// Gradual warmup: slow linear climb from base to peak over 2 minutes.
+        /// Gradual warmup: slow linear increase in workload over 2 minutes.
         /// </summary>
-        private double ScenarioGradualWarmup(double elapsed, double baseTemp, double peakTemp)
+        private double ScenarioGradualWarmupMultiplier(double elapsed)
         {
-            double range = peakTemp - baseTemp;
-
             if (elapsed < 120)
             {
-                // 2-minute linear climb
-                double progress = elapsed / 120.0;
-                return baseTemp + range * progress;
+                // 2-minute linear ramp to full workload
+                return elapsed / 120.0;
             }
             else
             {
-                // Hold at peak with slight fluctuation
-                double fluctuation = Math.Sin(elapsed / 6.0 * Math.PI * 2) * 1;
-                return peakTemp + fluctuation;
+                // Hold at full workload with slight fluctuation
+                double fluctuation = Math.Sin(elapsed / 6.0 * Math.PI * 2) * 0.02;
+                return Math.Clamp(1.0 + fluctuation, 0, 1);
             }
         }
 

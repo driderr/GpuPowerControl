@@ -22,7 +22,7 @@ public class OneWayValveTests
         };
         var device = new MockGpuDevice(minPower: config.DefaultMinPower, maxPower: config.DefaultMaxPower);
         var pid = new PidController(config.Kp, config.Ki, config.Kd, config.TargetTemp, config.DefaultMaxPower, config.DefaultMinPower,
-            config.IntegralMax, config.IntegralMin, config.MinimumDt);
+            config.IntegralMax, config.IntegralMin, config.IntegralBand, config.MinimumDt);
         var trigger = new TriggerEvaluator(config.TriggerTemp, config.PredictiveFloor, config.LookaheadSeconds);
         var controller = new ThermalController(device, pid, trigger, config);
 
@@ -54,7 +54,7 @@ public class OneWayValveTests
         };
         var device = new MockGpuDevice(minPower: config.DefaultMinPower, maxPower: config.DefaultMaxPower);
         var pid = new PidController(config.Kp, config.Ki, config.Kd, config.TargetTemp, config.DefaultMaxPower, config.DefaultMinPower,
-            config.IntegralMax, config.IntegralMin, config.MinimumDt);
+            config.IntegralMax, config.IntegralMin, config.IntegralBand, config.MinimumDt);
         var trigger = new TriggerEvaluator(config.TriggerTemp, config.PredictiveFloor, config.LookaheadSeconds);
         var controller = new ThermalController(device, pid, trigger, config);
 
@@ -88,7 +88,7 @@ public class OneWayValveTests
         };
         var device = new MockGpuDevice(minPower: config.DefaultMinPower, maxPower: config.DefaultMaxPower);
         var pid = new PidController(config.Kp, config.Ki, config.Kd, config.TargetTemp, config.DefaultMaxPower, config.DefaultMinPower,
-            config.IntegralMax, config.IntegralMin, config.MinimumDt);
+            config.IntegralMax, config.IntegralMin, config.IntegralBand, config.MinimumDt);
         var trigger = new TriggerEvaluator(config.TriggerTemp, config.PredictiveFloor, config.LookaheadSeconds);
         var controller = new ThermalController(device, pid, trigger, config);
 

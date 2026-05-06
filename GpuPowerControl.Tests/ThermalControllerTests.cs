@@ -15,7 +15,7 @@ public class ThermalControllerTests
         int mxp = maxPower ?? config.DefaultMaxPower;
         var device = new MockGpuDevice(minPower: mp, maxPower: mxp);
         var pid = new PidController(config.Kp, config.Ki, config.Kd, config.TargetTemp, mxp, mp,
-            config.IntegralMax, config.IntegralMin, config.MinimumDt);
+            config.IntegralMax, config.IntegralMin, config.IntegralBand, config.MinimumDt);
         var trigger = new TriggerEvaluator(config.TriggerTemp, config.PredictiveFloor, config.LookaheadSeconds);
         var controller = new ThermalController(device, pid, trigger, config);
 
@@ -591,7 +591,7 @@ public class ThermalControllerTests
         };
         var device = new MockGpuDevice(minPower: config.DefaultMinPower, maxPower: config.DefaultMaxPower);
         var pid = new PidController(config.Kp, config.Ki, config.Kd, config.TargetTemp, config.DefaultMaxPower, config.DefaultMinPower,
-            config.IntegralMax, config.IntegralMin, config.MinimumDt);
+            config.IntegralMax, config.IntegralMin, config.IntegralBand, config.MinimumDt);
         var trigger = new TriggerEvaluator(config.TriggerTemp, config.PredictiveFloor, config.LookaheadSeconds);
         var controller = new ThermalController(device, pid, trigger, config);
 
@@ -626,7 +626,7 @@ public class ThermalControllerTests
         };
         var device = new MockGpuDevice(minPower: config.DefaultMinPower, maxPower: config.DefaultMaxPower);
         var pid = new PidController(config.Kp, config.Ki, config.Kd, config.TargetTemp, config.DefaultMaxPower, config.DefaultMinPower,
-            config.IntegralMax, config.IntegralMin, config.MinimumDt);
+            config.IntegralMax, config.IntegralMin, config.IntegralBand, config.MinimumDt);
         var trigger = new TriggerEvaluator(config.TriggerTemp, config.PredictiveFloor, config.LookaheadSeconds);
         var controller = new ThermalController(device, pid, trigger, config);
 
@@ -651,7 +651,7 @@ public class ThermalControllerTests
         };
         var device = new MockGpuDevice(minPower: config.DefaultMinPower, maxPower: config.DefaultMaxPower);
         var pid = new PidController(config.Kp, config.Ki, config.Kd, config.TargetTemp, config.DefaultMaxPower, config.DefaultMinPower,
-            config.IntegralMax, config.IntegralMin, config.MinimumDt);
+            config.IntegralMax, config.IntegralMin, config.IntegralBand, config.MinimumDt);
         var trigger = new TriggerEvaluator(config.TriggerTemp, config.PredictiveFloor, config.LookaheadSeconds);
         var controller = new ThermalController(device, pid, trigger, config);
 
@@ -686,7 +686,7 @@ public class ThermalControllerTests
         };
         var device = new MockGpuDevice(minPower: config.DefaultMinPower, maxPower: config.DefaultMaxPower);
         var pid = new PidController(config.Kp, config.Ki, config.Kd, config.TargetTemp, config.DefaultMaxPower, config.DefaultMinPower,
-            config.IntegralMax, config.IntegralMin, config.MinimumDt);
+            config.IntegralMax, config.IntegralMin, config.IntegralBand, config.MinimumDt);
         var trigger = new TriggerEvaluator(config.TriggerTemp, config.PredictiveFloor, config.LookaheadSeconds);
         var controller = new ThermalController(device, pid, trigger, config);
 
@@ -717,7 +717,7 @@ public class ThermalControllerTests
         };
         var device = new MockGpuDevice(minPower: config.DefaultMinPower, maxPower: config.DefaultMaxPower);
         var pid = new PidController(config.Kp, config.Ki, config.Kd, config.TargetTemp, config.DefaultMaxPower, config.DefaultMinPower,
-            config.IntegralMax, config.IntegralMin, config.MinimumDt);
+            config.IntegralMax, config.IntegralMin, config.IntegralBand, config.MinimumDt);
         var trigger = new TriggerEvaluator(config.TriggerTemp, config.PredictiveFloor, config.LookaheadSeconds);
         var controller = new ThermalController(device, pid, trigger, config);
 
@@ -757,7 +757,7 @@ public class ThermalControllerTests
         };
         var device = new MockGpuDevice(minPower: config.DefaultMinPower, maxPower: config.DefaultMaxPower);
         var pid = new PidController(config.Kp, config.Ki, config.Kd, config.TargetTemp, config.DefaultMaxPower, config.DefaultMinPower,
-            config.IntegralMax, config.IntegralMin, config.MinimumDt);
+            config.IntegralMax, config.IntegralMin, config.IntegralBand, config.MinimumDt);
         var trigger = new TriggerEvaluator(config.TriggerTemp, config.PredictiveFloor, config.LookaheadSeconds);
         var controller = new ThermalController(device, pid, trigger, config);
 
@@ -793,7 +793,7 @@ public class ThermalControllerTests
         };
         var device = new MockGpuDevice(minPower: config.DefaultMinPower, maxPower: config.DefaultMaxPower);
         var pid = new PidController(config.Kp, config.Ki, config.Kd, config.TargetTemp, config.DefaultMaxPower, config.DefaultMinPower,
-            config.IntegralMax, config.IntegralMin, config.MinimumDt);
+            config.IntegralMax, config.IntegralMin, config.IntegralBand, config.MinimumDt);
         var trigger = new TriggerEvaluator(config.TriggerTemp, config.PredictiveFloor, config.LookaheadSeconds);
         var controller = new ThermalController(device, pid, trigger, config);
 
@@ -828,7 +828,7 @@ public class ThermalControllerTests
         };
         var device = new MockGpuDevice(minPower: config.DefaultMinPower, maxPower: config.DefaultMaxPower);
         var pid = new PidController(config.Kp, config.Ki, config.Kd, config.TargetTemp, config.DefaultMaxPower, config.DefaultMinPower,
-            config.IntegralMax, config.IntegralMin, config.MinimumDt);
+            config.IntegralMax, config.IntegralMin, config.IntegralBand, config.MinimumDt);
         var trigger = new TriggerEvaluator(config.TriggerTemp, config.PredictiveFloor, config.LookaheadSeconds);
         var controller = new ThermalController(device, pid, trigger, config);
 
@@ -858,7 +858,7 @@ public class ThermalControllerTests
         };
         var device = new MockGpuDevice(minPower: config.DefaultMinPower, maxPower: config.DefaultMaxPower);
         var pid = new PidController(config.Kp, config.Ki, config.Kd, config.TargetTemp, config.DefaultMaxPower, config.DefaultMinPower,
-            config.IntegralMax, config.IntegralMin, config.MinimumDt);
+            config.IntegralMax, config.IntegralMin, config.IntegralBand, config.MinimumDt);
         var trigger = new TriggerEvaluator(config.TriggerTemp, config.PredictiveFloor, config.LookaheadSeconds);
         var controller = new ThermalController(device, pid, trigger, config);
 
@@ -903,7 +903,7 @@ public class ThermalControllerTests
         };
         var device = new MockGpuDevice(minPower: config.DefaultMinPower, maxPower: config.DefaultMaxPower);
         var pid = new PidController(config.Kp, config.Ki, config.Kd, config.TargetTemp, config.DefaultMaxPower, config.DefaultMinPower,
-            config.IntegralMax, config.IntegralMin, config.MinimumDt);
+            config.IntegralMax, config.IntegralMin, config.IntegralBand, config.MinimumDt);
         var trigger = new TriggerEvaluator(config.TriggerTemp, config.PredictiveFloor, config.LookaheadSeconds);
         var controller = new ThermalController(device, pid, trigger, config);
 
@@ -937,7 +937,7 @@ public class ThermalControllerTests
         };
         var device = new MockGpuDevice(minPower: config.DefaultMinPower, maxPower: config.DefaultMaxPower);
         var pid = new PidController(config.Kp, config.Ki, config.Kd, config.TargetTemp, config.DefaultMaxPower, config.DefaultMinPower,
-            config.IntegralMax, config.IntegralMin, config.MinimumDt);
+            config.IntegralMax, config.IntegralMin, config.IntegralBand, config.MinimumDt);
         var trigger = new TriggerEvaluator(config.TriggerTemp, config.PredictiveFloor, config.LookaheadSeconds);
         var controller = new ThermalController(device, pid, trigger, config);
 
@@ -950,12 +950,12 @@ public class ThermalControllerTests
         int powerAfterTrigger = controller.CurrentPowerLimit;
 
         // Step at lower temp - PID wants to increase power
-        // Advance time past interval
-        currentTime = currentTime.AddMilliseconds(3000);
+        // Advance a small amount of time so we can verify rate limiting per real elapsed seconds
+        currentTime = currentTime.AddMilliseconds(250); // 0.25s elapsed since last change
         controller.Step(70, dt: 0.25);
 
         // Power increase should be limited by NormalMaxPowerIncreaseRateWps
-        // At 15W/s and dt=0.25, max increase = floor(15 * 0.25) = 3W
+        // At 15W/s and 0.25s elapsed, max increase = floor(15 * 0.25) = 3W
         int powerIncrease = controller.CurrentPowerLimit - powerAfterTrigger;
         Assert.True(powerIncrease <= 4, $"Normal PID power increase should be rate-limited to ~3W/step, got {powerIncrease}W");
     }
@@ -973,7 +973,7 @@ public class ThermalControllerTests
         };
         var device = new MockGpuDevice(minPower: config.DefaultMinPower, maxPower: config.DefaultMaxPower);
         var pid = new PidController(config.Kp, config.Ki, config.Kd, config.TargetTemp, config.DefaultMaxPower, config.DefaultMinPower,
-            config.IntegralMax, config.IntegralMin, config.MinimumDt);
+            config.IntegralMax, config.IntegralMin, config.IntegralBand, config.MinimumDt);
         var trigger = new TriggerEvaluator(config.TriggerTemp, config.PredictiveFloor, config.LookaheadSeconds);
         var controller = new ThermalController(device, pid, trigger, config);
 
@@ -1005,7 +1005,7 @@ public class ThermalControllerTests
         };
         var device = new MockGpuDevice(minPower: config.DefaultMinPower, maxPower: config.DefaultMaxPower);
         var pid = new PidController(config.Kp, config.Ki, config.Kd, config.TargetTemp, config.DefaultMaxPower, config.DefaultMinPower,
-            config.IntegralMax, config.IntegralMin, config.MinimumDt);
+            config.IntegralMax, config.IntegralMin, config.IntegralBand, config.MinimumDt);
         var trigger = new TriggerEvaluator(config.TriggerTemp, config.PredictiveFloor, config.LookaheadSeconds);
         var controller = new ThermalController(device, pid, trigger, config);
 

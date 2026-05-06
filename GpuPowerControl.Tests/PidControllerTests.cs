@@ -23,6 +23,7 @@ public class PidControllerTests
             minPower ?? config.DefaultMinPower,
             config.IntegralMax,
             config.IntegralMin,
+            config.IntegralBand,
             config.MinimumDt);
     }
 
