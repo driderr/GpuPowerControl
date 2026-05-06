@@ -13,6 +13,9 @@ namespace GpuThermalController
     {
         static void Main(string[] args)
         {
+            // Set console title for profiling scripts to identify this process
+            Console.Title = "GpuPowerControl";
+            
             // Parse command-line arguments
             bool simulateMode = false;
             string? scenarioArg = null;

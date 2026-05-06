@@ -1,0 +1,2 @@
+# This file keeps the results directory tracked in git.
+# Profiling output files (.log, .dump, .speedscope.json) are written here by the scripts.
