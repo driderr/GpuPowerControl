@@ -340,7 +340,7 @@ namespace GpuThermalController.Core
                 SimulationScenario.Idle => 48.0,
                 SimulationScenario.Spike => 85.0,
                 SimulationScenario.SustainedLoad => 82.0,
-                SimulationScenario.Emergency => 95.0,
+                SimulationScenario.Emergency => 120.0,
                 SimulationScenario.GradualWarmup => 80.0,
                 _ => 80.0, // Default
             };
