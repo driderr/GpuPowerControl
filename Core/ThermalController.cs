@@ -189,7 +189,12 @@ namespace GpuThermalController.Core
                             double ratePerSecond = _isEmergencyRecovering
                                 ? _config.EmergencyRecoveryRateWps
                                 : _config.NormalMaxPowerIncreaseRateWps;
-                            int maxIncrease = (int)Math.Floor(ratePerSecond * dt);
+                            // Use actual elapsed time since last power change, not the control loop dt.
+                            // This ensures the rate limit (e.g., 15 W/s) is applied per real second.
+                            double elapsedSinceLastChange = _lastPowerChangeTime == DateTimeOffset.MinValue
+                                ? dt
+                                : (TimeProvider() - _lastPowerChangeTime).TotalSeconds;
+                            int maxIncrease = (int)Math.Floor(ratePerSecond * elapsedSinceLastChange);
                             if (maxIncrease > 0 && newPower > _currentPowerLimit + maxIncrease)
                             {
                                 finalPower = _currentPowerLimit + maxIncrease;

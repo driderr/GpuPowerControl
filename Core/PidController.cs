@@ -21,6 +21,7 @@ namespace GpuThermalController.Core
         private readonly uint _targetTemp;
         private readonly double _integralMax;
         private readonly double _integralMin;
+        private readonly double _integralBand;
         private readonly double _minimumDt;
 
         /// <summary>Current accumulated integral value (exposed for testing and state management).</summary>
@@ -38,6 +39,7 @@ namespace GpuThermalController.Core
             int minPower,
             double integralMax,
             double integralMin,
+            double integralBand,
             double minimumDt)
         {
             _kp = kp;
@@ -48,6 +50,7 @@ namespace GpuThermalController.Core
             _minPower = minPower;
             _integralMax = integralMax;
             _integralMin = integralMin;
+            _integralBand = integralBand;
             _minimumDt = minimumDt;
             Integral = 0;
         }
@@ -69,10 +72,20 @@ namespace GpuThermalController.Core
             // Proportional term
             double P = _kp * error;
 
-            // Integral term with anti-windup
-            Integral += (error * dt);
-            if (Integral > _integralMax) Integral = _integralMax;
-            if (Integral < _integralMin) Integral = _integralMin;
+            // Conditional integration: only accumulate when near target.
+            // When far from target, P handles the large error and D handles the rate of change.
+            // Reset integral when out of band so it starts fresh when approaching target.
+            double absError = Math.Abs(error);
+            if (absError > _integralBand)
+            {
+                Integral = 0;
+            }
+            else
+            {
+                Integral += (error * dt);
+                if (Integral > _integralMax) Integral = _integralMax;
+                if (Integral < _integralMin) Integral = _integralMin;
+            }
             double I = _ki * Integral;
 
             // Derivative term (only when temperature is rising)
