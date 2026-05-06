@@ -174,7 +174,7 @@ public class ConsoleDashboard : IDisposable
 
         // === TEMPERATURE BAR ===
         _renderables.Add(sNewline);
-        _renderables.Add(new Markup($"Temp: [bold]{current.Temperature}C[/]  |  Target: {config.TargetTemp}C  |  Trigger: {config.TriggerTemp}C  |  Emergency: {config.EmergencyTemp}C"));
+        _renderables.Add(new Markup($"Temp: [bold]{current.Temperature:F1}C[/]  |  Target: {config.TargetTemp}C  |  Trigger: {config.TriggerTemp}C  |  Emergency: {config.EmergencyTemp}C"));
         _renderables.Add(CreateTempBar(current.Temperature, config));
 
         // === POWER BAR ===
@@ -255,7 +255,7 @@ public class ConsoleDashboard : IDisposable
         // Right content is built inline in RenderFrame via BuildHistoryColumn
     }
 
-    private IRenderable CreateTempBar(uint temp, DashboardConfig config)
+    private IRenderable CreateTempBar(double temp, DashboardConfig config)
     {
         var barColorName = temp <= config.TargetTemp ? "green"
             : temp < config.TriggerTemp ? "yellow"

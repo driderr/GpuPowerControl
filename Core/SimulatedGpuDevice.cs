@@ -91,11 +91,12 @@ namespace GpuThermalController.Core
             _currentTemp = GetBaseTemp();
         }
 
-        public bool GetTemperature(out uint temperature)
+        public bool GetTemperature(out double temperature)
         {
             // Always succeed in simulation
+            // Return raw double - no rounding. Rounding happens at the display layer.
             double simulated = CalculateTemperature();
-            temperature = (uint)Math.Max(0, Math.Round(simulated));
+            temperature = Math.Max(0, simulated);
             return true;
         }
 

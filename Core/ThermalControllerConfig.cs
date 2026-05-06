@@ -11,7 +11,7 @@ namespace GpuThermalController.Core
         public uint EmergencyTemp { get; set; } = 90;
 
         // PID gains
-        public double Kp { get; set; } = 8.0;
+        public double Kp { get; set; } = 20.0;
         public double Ki { get; set; } = 0.5;
         public double Kd { get; set; } = 2.5;
 
@@ -20,7 +20,7 @@ namespace GpuThermalController.Core
         public double IntegralMin { get; set; } = -50;
 
         // Conditional integration: only accumulate integral within this band around target
-        public double IntegralBand { get; set; } = 5; // °C — reset integral when |error| exceeds this
+        public double IntegralBand { get; set; } = 15; // °C — reset integral when |error| exceeds this
 
         // Timing
         public double DefaultDt { get; set; } = 0.25;

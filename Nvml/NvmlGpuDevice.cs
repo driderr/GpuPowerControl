@@ -63,10 +63,11 @@ namespace GpuThermalController.Nvml
             return new NvmlGpuDevice(index, handle, name, minPower, maxPower);
         }
 
-        public bool GetTemperature(out uint temperature)
+        public bool GetTemperature(out double temperature)
         {
-            temperature = 0;
-            int result = NVML.nvmlDeviceGetTemperature(_handle, 0, out temperature); // 0 = NVML_TEMPERATURE_GPU
+            uint rawTemp = 0;
+            int result = NVML.nvmlDeviceGetTemperature(_handle, 0, out rawTemp); // 0 = NVML_TEMPERATURE_GPU
+            temperature = rawTemp; // NVML returns integer precision, cast to double for controller
             return result == 0;
         }
 

@@ -8,7 +8,7 @@ namespace GpuThermalController.Dashboard;
 /// </summary>
 public record DashboardEvent(
     DateTime Timestamp,
-    uint Temperature,
+    double Temperature,
     int PowerLimit,
     bool IsControlling,
     ControllerEventType EventType,
