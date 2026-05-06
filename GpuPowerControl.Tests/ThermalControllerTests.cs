@@ -466,14 +466,20 @@ public class ThermalControllerTests
     {
         var (controller, device, events) = CreateController();
 
+        // Use controllable time so interval gate doesn't block adjustments
+        var currentTime = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        controller.TimeProvider = () => currentTime;
+
         controller.Step(85);  // trigger
         Assert.True(controller.StateTransitions >= 1);
 
-        int transitionsBefore = controller.StateTransitions;
-
         // Cool down and restore power
-        for (int i = 0; i < 25; i++)
+        // Rate-limited increases (15W/s * 0.25s = ~3.75W/step) so many steps to restore from reduced power to 600W
+        for (int i = 0; i < 200; i++)
+        {
+            currentTime = currentTime.AddMilliseconds(3000);  // Advance past interval cooldown
             controller.Step(70);
+        }
 
         // Should have transitioned back at least once more (controlling -> idle)
         // Total transitions should be >= 2
@@ -529,6 +535,33 @@ public class ThermalControllerTests
     {
         var (controller, device, events) = CreateController();
         Assert.Equal(0, controller.ConsecutiveReadFailures);
+    }
+
+    [Fact]
+    public void Step_ConsecutiveReadFailures_ForceEmergencyAfterMaxFailures()
+    {
+        var (controller, device, events) = CreateController();
+        device.SetConstantTemperature(60);
+
+        // Initial state: normal, power at max
+        controller.Step(60);
+        Assert.Equal(600, controller.CurrentPowerLimit);
+
+        // Make reads fail — after MaxConsecutiveReadFailures (5), should force emergency temp
+        // which triggers emergency path and forces minimum power
+        device.GetTemperatureShouldFail = true;
+        var currentTime = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        controller.TimeProvider = () => currentTime;
+
+        for (int i = 0; i < 10; i++)
+        {
+            currentTime = currentTime.AddMilliseconds(3000);
+            controller.Step();  // No simulated temp, reads from device which fails
+        }
+
+        // Should have forced emergency — power at minimum
+        Assert.Equal(150, controller.CurrentPowerLimit);
+        Assert.True(controller.ConsecutiveReadFailures >= 5);
     }
 
     // === TEST 20: Config Property ===
@@ -808,8 +841,199 @@ public class ThermalControllerTests
         // Hit emergency temp
         controller.Step(95);
 
-        // Should force minimum power regardless of gates
+// Should force minimum power regardless of gates
         Assert.Equal(150, controller.CurrentPowerLimit);
         Assert.Contains(events, e => e.EventType == ControllerEventType.Emergency);
+    }
+
+    // === TEST 25: Emergency Hold Forces Minimum Power ===
+
+    [Fact]
+    public void Step_EmergencyHold_ForcesMinimumPowerForDuration()
+    {
+        var config = new ThermalControllerConfig
+        {
+            EmergencyHoldMs = 5000,
+            MinAdjustmentIntervalMs = 0
+        };
+        var device = new MockGpuDevice(minPower: config.DefaultMinPower, maxPower: config.DefaultMaxPower);
+        var pid = new PidController(config.Kp, config.Ki, config.Kd, config.TargetTemp, config.DefaultMaxPower, config.DefaultMinPower,
+            config.IntegralMax, config.IntegralMin, config.MinimumDt);
+        var trigger = new TriggerEvaluator(config.TriggerTemp, config.PredictiveFloor, config.LookaheadSeconds);
+        var controller = new ThermalController(device, pid, trigger, config);
+
+        var events = new List<ThermalControllerEventArgs>();
+        controller.OnStateChange += (_, e) => events.Add(e);
+
+        // Controllable time
+        var currentTime = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        controller.TimeProvider = () => currentTime;
+
+        // Hit emergency
+        controller.Step(95);
+        Assert.Equal(150, controller.CurrentPowerLimit);
+
+        // Temp drops below emergency but hold not expired - should stay at 150W
+        controller.Step(60);
+        Assert.Equal(150, controller.CurrentPowerLimit);
+
+        // Still within hold period
+        currentTime = currentTime.AddMilliseconds(3000);
+        controller.Step(55);
+        Assert.Equal(150, controller.CurrentPowerLimit);
+
+        // After hold expires, PID should engage and allow power to increase
+        currentTime = currentTime.AddMilliseconds(3000); // Total 6000ms > 5000ms hold
+        controller.Step(50);
+        // Power may have increased from 150W now that hold is over
+        Assert.True(controller.IsControlling);
+    }
+
+// === TEST 26: Emergency Recovery Rate-Limits Power Increase ===
+
+    [Fact]
+    public void Step_EmergencyRecovery_RateLimitsPowerIncrease()
+    {
+        var config = new ThermalControllerConfig
+        {
+            EmergencyHoldMs = 100,        // Very short hold for testing
+            EmergencyRecoveryRateWps = 5, // 5W/s = 1.25W per step at dt=0.25
+            NormalMaxPowerIncreaseRateWps = 15,
+            MinAdjustmentIntervalMs = 0
+        };
+        var device = new MockGpuDevice(minPower: config.DefaultMinPower, maxPower: config.DefaultMaxPower);
+        var pid = new PidController(config.Kp, config.Ki, config.Kd, config.TargetTemp, config.DefaultMaxPower, config.DefaultMinPower,
+            config.IntegralMax, config.IntegralMin, config.MinimumDt);
+        var trigger = new TriggerEvaluator(config.TriggerTemp, config.PredictiveFloor, config.LookaheadSeconds);
+        var controller = new ThermalController(device, pid, trigger, config);
+
+        // Controllable time
+        var currentTime = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        controller.TimeProvider = () => currentTime;
+
+        // Hit emergency
+        controller.Step(95);
+        Assert.Equal(150, controller.CurrentPowerLimit);
+
+        // Advance past hold period
+        currentTime = currentTime.AddMilliseconds(200);
+
+        // Step at low temp - PID wants to increase power a lot, but rate limited
+        controller.Step(50, dt: 0.25);
+        // At 5W/s recovery rate and dt=0.25, max increase = floor(5 * 0.25) = 1W
+        // So power can go from 150 to at most 151
+        Assert.True(controller.CurrentPowerLimit <= 152, $"Power should be rate-limited during recovery, got {controller.CurrentPowerLimit}");
+    }
+
+    // === TEST 27: Normal PID Also Rate-Limits Power Increase ===
+
+    [Fact]
+    public void Step_NormalPID_RateLimitsPowerIncrease()
+    {
+        var config = new ThermalControllerConfig
+        {
+            NormalMaxPowerIncreaseRateWps = 15, // 15W/s = 3.75W per step at dt=0.25
+            MinAdjustmentIntervalMs = 0
+        };
+        var device = new MockGpuDevice(minPower: config.DefaultMinPower, maxPower: config.DefaultMaxPower);
+        var pid = new PidController(config.Kp, config.Ki, config.Kd, config.TargetTemp, config.DefaultMaxPower, config.DefaultMinPower,
+            config.IntegralMax, config.IntegralMin, config.MinimumDt);
+        var trigger = new TriggerEvaluator(config.TriggerTemp, config.PredictiveFloor, config.LookaheadSeconds);
+        var controller = new ThermalController(device, pid, trigger, config);
+
+        // Controllable time
+        var currentTime = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        controller.TimeProvider = () => currentTime;
+
+        // Trigger normal control (no emergency)
+        controller.Step(85);
+        int powerAfterTrigger = controller.CurrentPowerLimit;
+
+        // Step at lower temp - PID wants to increase power
+        // Advance time past interval
+        currentTime = currentTime.AddMilliseconds(3000);
+        controller.Step(70, dt: 0.25);
+
+        // Power increase should be limited by NormalMaxPowerIncreaseRateWps
+        // At 15W/s and dt=0.25, max increase = floor(15 * 0.25) = 3W
+        int powerIncrease = controller.CurrentPowerLimit - powerAfterTrigger;
+        Assert.True(powerIncrease <= 4, $"Normal PID power increase should be rate-limited to ~3W/step, got {powerIncrease}W");
+    }
+
+    // === TEST 28: Power Decreases Are NOT Rate-Limited ===
+
+    [Fact]
+    public void Step_PowerDecrease_NotRateLimited()
+    {
+        var config = new ThermalControllerConfig
+        {
+            NormalMaxPowerIncreaseRateWps = 1, // Very restrictive increase rate
+            EmergencyRecoveryRateWps = 1,
+            MinAdjustmentIntervalMs = 0
+        };
+        var device = new MockGpuDevice(minPower: config.DefaultMinPower, maxPower: config.DefaultMaxPower);
+        var pid = new PidController(config.Kp, config.Ki, config.Kd, config.TargetTemp, config.DefaultMaxPower, config.DefaultMinPower,
+            config.IntegralMax, config.IntegralMin, config.MinimumDt);
+        var trigger = new TriggerEvaluator(config.TriggerTemp, config.PredictiveFloor, config.LookaheadSeconds);
+        var controller = new ThermalController(device, pid, trigger, config);
+
+        var currentTime = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        controller.TimeProvider = () => currentTime;
+
+        // Trigger control at 85°C
+        controller.Step(85);
+        int powerAfterTrigger = controller.CurrentPowerLimit;
+
+        // Spike temp higher - power should decrease without rate limit
+        currentTime = currentTime.AddMilliseconds(3000);
+        controller.Step(89, dt: 0.25);
+
+        // Power should have decreased (rate limit only applies to increases)
+        Assert.True(controller.CurrentPowerLimit <= powerAfterTrigger,
+            "Power decrease should not be rate-limited");
+    }
+
+    // === TEST 29: Emergency Re-Trigger Resets Hold ===
+
+    [Fact]
+    public void Step_EmergencyReTrigger_ResetsHold()
+    {
+        var config = new ThermalControllerConfig
+        {
+            EmergencyHoldMs = 5000,
+            MinAdjustmentIntervalMs = 0
+        };
+        var device = new MockGpuDevice(minPower: config.DefaultMinPower, maxPower: config.DefaultMaxPower);
+        var pid = new PidController(config.Kp, config.Ki, config.Kd, config.TargetTemp, config.DefaultMaxPower, config.DefaultMinPower,
+            config.IntegralMax, config.IntegralMin, config.MinimumDt);
+        var trigger = new TriggerEvaluator(config.TriggerTemp, config.PredictiveFloor, config.LookaheadSeconds);
+        var controller = new ThermalController(device, pid, trigger, config);
+
+        var currentTime = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        controller.TimeProvider = () => currentTime;
+
+        // First emergency
+        controller.Step(95);
+        Assert.Equal(150, controller.CurrentPowerLimit);
+
+        // Advance 3 seconds into hold
+        currentTime = currentTime.AddMilliseconds(3000);
+
+        // Re-trigger emergency
+        controller.Step(95);
+        Assert.Equal(150, controller.CurrentPowerLimit);
+
+        // Advance 3 more seconds (6 total from first, but only 3 from re-trigger)
+        currentTime = currentTime.AddMilliseconds(3000);
+
+        // Hold should still be active (only 3s since re-trigger, need 5s)
+        controller.Step(60);
+        Assert.Equal(150, controller.CurrentPowerLimit);
+
+        // Advance past the re-triggered hold
+        currentTime = currentTime.AddMilliseconds(3000);
+        controller.Step(50);
+        // Now hold has expired, PID should engage
+        Assert.True(controller.IsControlling);
     }
 }

@@ -30,7 +30,7 @@ namespace GpuThermalController.Core
         public double PredictiveFloor { get; set; } = 70;
 
         // Exit condition hysteresis (exit when temp <= TargetTemp - ExitHysteresis)
-        public uint ExitHysteresis { get; set; } = 2;
+        public uint ExitHysteresis { get; set; } = 5;
 
         // Fault tolerance
         public int MaxConsecutiveReadFailures { get; set; } = 5;
@@ -45,5 +45,10 @@ namespace GpuThermalController.Core
         public uint NearTargetThreshold { get; set; } = 3;      // Degrees from target to switch to fine-tuning
         public int MinAdjustmentIntervalMs { get; set; } = 2500; // Cooldown between power changes
         public double IntervalBypassDerivative { get; set; } = 2.0; // °C/s - bypass interval when rising faster
+        public double NormalMaxPowerIncreaseRateWps { get; set; } = 15; // Max power increase rate during normal PID (Watts/second)
+
+        // Emergency recovery
+        public int EmergencyHoldMs { get; set; } = 5000;        // Force minimum power for this duration after emergency (ms)
+        public double EmergencyRecoveryRateWps { get; set; } = 5;  // Max power increase rate during emergency recovery (Watts/second)
     }
 }
