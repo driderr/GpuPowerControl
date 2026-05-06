@@ -28,6 +28,10 @@ namespace GpuThermalController.Core
         private DateTimeOffset _lastPowerChangeTime;
         private CancellationTokenSource? _cts;
 
+        // Emergency recovery state
+        private DateTimeOffset _emergencyHoldUntil = DateTimeOffset.MinValue;
+        private bool _isEmergencyRecovering;
+
         public bool IsControlling => _isControlling;
         public int CurrentPowerLimit => _currentPowerLimit;
         public uint LastKnownGoodTemp => _lastKnownGoodTemp;
@@ -106,6 +110,20 @@ namespace GpuThermalController.Core
                 RaiseEvent(currentTemp, _currentPowerLimit, _isControlling,
                     ControllerEventType.Emergency,
                     $"[EMERGENCY] Temp hit {currentTemp}C! Forcing minimum power limit ({_device.MinPower}W).");
+
+                // Start emergency hold timer and enter recovery mode
+                _emergencyHoldUntil = TimeProvider().AddMilliseconds(_config.EmergencyHoldMs);
+                _isEmergencyRecovering = true;
+
+                _lastKnownGoodTemp = currentTemp;
+                OnStep?.Invoke(this, new StepEventArgs(currentTemp, 0, _isControlling));
+                return;
+            }
+
+            // 2. EMERGENCY HOLD - force minimum power for configured duration after emergency
+            if (_isEmergencyRecovering && TimeProvider() < _emergencyHoldUntil)
+            {
+                SetPowerLimit(_device.MinPower);
                 _lastKnownGoodTemp = currentTemp;
                 OnStep?.Invoke(this, new StepEventArgs(currentTemp, 0, _isControlling));
                 return;
@@ -117,19 +135,32 @@ namespace GpuThermalController.Core
             // 2. TRIGGER EVALUATION
             if (!_isControlling)
             {
-                TriggerResult trigger = _triggerEvaluator.Evaluate(currentTemp, derivative, _isControlling);
-
-                if (trigger != TriggerResult.None)
-                    {
+                // After emergency hold expires, engage PID for recovery
+                if (_isEmergencyRecovering)
+                {
                     _isControlling = true;
                     _stateTransitions++;
                     _pidController.Reset();
+                    RaiseEvent(currentTemp, _currentPowerLimit, _isControlling,
+                        ControllerEventType.Trigger,
+                        $"[EMERGENCY RECOVERY] Hold complete. Engaging PID with rate-limited recovery.");
+                }
+                else
+                {
+                    TriggerResult trigger = _triggerEvaluator.Evaluate(currentTemp, derivative, _isControlling);
 
-                    string msg = trigger == TriggerResult.Predictive
-                        ? $"[PREDICTIVE TRIGGER] Temp {currentTemp}C rising at {derivative:F1}C/s. Engaging early."
-                        : $"[SAFETY TRIGGER] Temp hit {currentTemp}C. Engaging PID control.";
+                    if (trigger != TriggerResult.None)
+                        {
+                        _isControlling = true;
+                        _stateTransitions++;
+                        _pidController.Reset();
 
-                    RaiseEvent(currentTemp, _currentPowerLimit, _isControlling, ControllerEventType.Trigger, msg);
+                        string msg = trigger == TriggerResult.Predictive
+                            ? $"[PREDICTIVE TRIGGER] Temp {currentTemp}C rising at {derivative:F1}C/s. Engaging early."
+                            : $"[SAFETY TRIGGER] Temp hit {currentTemp}C. Engaging PID control.";
+
+                        RaiseEvent(currentTemp, _currentPowerLimit, _isControlling, ControllerEventType.Trigger, msg);
+                    }
                 }
             }
 
@@ -141,42 +172,70 @@ namespace GpuThermalController.Core
 
                 if (newPower != _currentPowerLimit)
                 {
-                    // Gate 1: Minimum delta - only make meaningful changes
-                    int delta = Math.Abs(newPower - _currentPowerLimit);
-                    int requiredDelta = (currentTemp >= _config.TargetTemp - _config.NearTargetThreshold &&
-                                          currentTemp <= _config.TargetTemp + _config.NearTargetThreshold)
-                        ? _config.MinPowerDeltaNearW
-                        : _config.MinPowerDeltaFarW;
-
-                    if (delta < requiredDelta)
+                    // Gate 1: Never increase power while at or above trigger temperature
+                    if (newPower > _currentPowerLimit && currentTemp >= _config.TriggerTemp)
                     {
-                        // Change too small to be meaningful - skip
-                    }
-                    else if (newPower > _currentPowerLimit && currentTemp >= _config.TriggerTemp)
-                    {
-                        // Gate 2: Never increase power while at or above trigger temperature
+                        // Block increase while hot
                     }
                     else
                     {
+                        // Rate-limit power increases BEFORE delta gate so they don't fight
+                        int finalPower = newPower;
+                        bool isIncrease = newPower > _currentPowerLimit;
+                        bool isRateLimited = false;
+
+                        if (isIncrease)
+                        {
+                            double ratePerSecond = _isEmergencyRecovering
+                                ? _config.EmergencyRecoveryRateWps
+                                : _config.NormalMaxPowerIncreaseRateWps;
+                            int maxIncrease = (int)Math.Floor(ratePerSecond * dt);
+                            if (maxIncrease > 0 && newPower > _currentPowerLimit + maxIncrease)
+                            {
+                                finalPower = _currentPowerLimit + maxIncrease;
+                                isRateLimited = true;
+                            }
+                        }
+
+                        // Gate 2: Minimum delta - only apply to decreases (prevent tiny power reductions from noise)
+                        // For increases: PID already smooths output, and rate limiter handles the big jumps.
+                        // Skipping delta gate for increases avoids getting stuck when power is within a few watts of target.
+                        bool deltaBlocked = false;
+                        if (!isIncrease && !isRateLimited)
+                        {
+                            int delta = Math.Abs(finalPower - _currentPowerLimit);
+                            int requiredDelta = (currentTemp >= _config.TargetTemp - _config.NearTargetThreshold &&
+                                                  currentTemp <= _config.TargetTemp + _config.NearTargetThreshold)
+                                ? _config.MinPowerDeltaNearW
+                                : _config.MinPowerDeltaFarW;
+
+                            if (delta < requiredDelta)
+                            {
+                                deltaBlocked = true;
+                            }
+                        }
+
                         // Gate 3: Minimum interval between adjustments (bypassed when temp rising fast)
                         bool intervalOk = (TimeProvider() - _lastPowerChangeTime).TotalMilliseconds >= _config.MinAdjustmentIntervalMs;
                         bool intervalBypassed = derivative >= _config.IntervalBypassDerivative;
 
-                        if (intervalOk || intervalBypassed)
+                        if (!deltaBlocked && (intervalOk || intervalBypassed))
                         {
-                            SetPowerLimit(newPower);
+                            SetPowerLimit(finalPower);
                             _lastPowerChangeTime = TimeProvider();
                             RaiseEvent(currentTemp, _currentPowerLimit, _isControlling,
                                 ControllerEventType.Info,
-                                $"[{DateTime.Now:HH:mm:ss}] Temp: {currentTemp}C | Target: {_config.TargetTemp}C | Limiting Power to: {newPower}W");
+                                $"[{DateTime.Now:HH:mm:ss}] Temp: {currentTemp}C | Target: {_config.TargetTemp}C | Limiting Power to: {finalPower}W");
                         }
                     }
                 }
 
-                // Exit condition: temp sufficiently below target AND power fully restored
+                // Exit condition: check EVERY step (even when PID output == current power)
+                // Otherwise once power reaches max, PID outputs max too, and exit is never reached
                 if (currentTemp <= _config.TargetTemp - _config.ExitHysteresis && _currentPowerLimit >= _device.MaxPower)
-                    {
+                {
                     _isControlling = false;
+                    _isEmergencyRecovering = false;
                     _stateTransitions++;
                     _pidController.Reset();
                     RaiseEvent(currentTemp, _currentPowerLimit, _isControlling,
@@ -204,8 +263,9 @@ namespace GpuThermalController.Core
 
         /// <summary>
         /// Reads temperature from the device. If the device fails to respond
-        /// for MaxConsecutiveReadFailures in a row, returns the last known good
-        /// temperature instead of continuing to hammer the failing device.
+        /// for MaxConsecutiveReadFailures in a row, returns EmergencyTemp to force
+        /// the emergency safety path (minimum power) rather than continuing to
+        /// operate on stale temperature data.
         /// </summary>
         private uint SafeGetTemperature()
         {
@@ -223,8 +283,8 @@ namespace GpuThermalController.Core
                 {
                     RaiseEvent(_lastKnownGoodTemp, _currentPowerLimit, _isControlling,
                         ControllerEventType.Warning,
-                        $"Warning: Temperature read failed {_consecutiveReadFailures} consecutive times. Using last known temp ({_lastKnownGoodTemp}C).");
-                    return _lastKnownGoodTemp;
+                        $"Warning: Temperature read failed {_consecutiveReadFailures} consecutive times. Forcing emergency temp ({_config.EmergencyTemp}C).");
+                    return _config.EmergencyTemp;
                 }
 
                 return _lastKnownGoodTemp;
