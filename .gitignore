@@ -41,4 +41,7 @@ Profiling/results/*
 Profiling/dotnet-counters
 Profiling/dotnet-trace
 Profiling/dotnet-dump
+dotnet-counters
+dotnet-trace
+dotnet-dump
 
