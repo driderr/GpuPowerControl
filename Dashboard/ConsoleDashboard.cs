@@ -322,7 +322,7 @@ public class ConsoleDashboard : IDisposable
 
         for (int row = chartHeight - 1; row >= 0; row--)
         {
-            var threshold = minVal + (range * (row + 1) / chartHeight);
+            var threshold = minVal + (range * row / (chartHeight - 1));
             segments.Add(new Segment($" {threshold:F0}{unit} ", sStyleGray));
             segments.Add(new Segment("│", sStyleGray));
 
