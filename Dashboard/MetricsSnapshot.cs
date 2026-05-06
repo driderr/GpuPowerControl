@@ -10,7 +10,7 @@ namespace GpuThermalController.Dashboard;
 public record MetricsSnapshot(
     DateTime Timestamp,
     TimeSpan Uptime,
-    uint Temperature,
+    double Temperature,
     int CurrentPowerLimit,
     bool IsControlling,
     double Derivative,

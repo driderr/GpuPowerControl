@@ -20,7 +20,7 @@ namespace GpuThermalController.Core
         public Func<DateTimeOffset> TimeProvider { get; set; } = () => DateTimeOffset.Now;
 
         private bool _isControlling = false;
-        private uint _lastKnownGoodTemp;
+        private double _lastKnownGoodTemp;
         private int _currentPowerLimit;
         private int _consecutiveReadFailures;
         private int _pidCycles;
@@ -34,7 +34,7 @@ namespace GpuThermalController.Core
 
         public bool IsControlling => _isControlling;
         public int CurrentPowerLimit => _currentPowerLimit;
-        public uint LastKnownGoodTemp => _lastKnownGoodTemp;
+        public double LastKnownGoodTemp => _lastKnownGoodTemp;
         public PidController PidController => _pidController;
         public ThermalControllerConfig Config => _config;
         public int ConsecutiveReadFailures => _consecutiveReadFailures;
@@ -47,7 +47,7 @@ namespace GpuThermalController.Core
         /// <summary>Raised after each step completes. Used by the dashboard data provider.</summary>
         public event EventHandler<StepEventArgs>? OnStep;
 
-        public record StepEventArgs(uint Temperature, double Derivative, bool IsControlling);
+        public record StepEventArgs(double Temperature, double Derivative, bool IsControlling);
 
         public ThermalController(
             IGpuDevice device,
@@ -99,9 +99,7 @@ namespace GpuThermalController.Core
             if (dt < 0) dt = _config.DefaultDt;
             if (dt <= 0) dt = _config.MinimumDt;
 
-            uint currentTemp = simulatedTemp.HasValue
-                ? (uint)Math.Round(simulatedTemp.Value)
-                : SafeGetTemperature();
+            double currentTemp = simulatedTemp ?? SafeGetTemperature();
 
             // 1. EMERGENCY SAFETY
             if (currentTemp >= _config.EmergencyTemp)
@@ -272,9 +270,9 @@ namespace GpuThermalController.Core
         /// the emergency safety path (minimum power) rather than continuing to
         /// operate on stale temperature data.
         /// </summary>
-        private uint SafeGetTemperature()
+        private double SafeGetTemperature()
         {
-            if (_device.GetTemperature(out uint temp))
+            if (_device.GetTemperature(out double temp))
             {
                 _consecutiveReadFailures = 0;
                 _lastKnownGoodTemp = temp;
@@ -317,7 +315,7 @@ namespace GpuThermalController.Core
             _currentPowerLimit = _device.MaxPower;
         }
 
-        private void RaiseEvent(uint temperature, int powerLimit, bool isControlling, ControllerEventType eventType, string? message)
+        private void RaiseEvent(double temperature, int powerLimit, bool isControlling, ControllerEventType eventType, string? message)
         {
             OnStateChange?.Invoke(this, new ThermalControllerEventArgs(temperature, powerLimit, isControlling, eventType, message));
         }

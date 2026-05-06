@@ -17,9 +17,9 @@ namespace GpuThermalController.Interfaces
         /// <summary>
         /// Gets the current GPU temperature in degrees Celsius.
         /// </summary>
-        /// <param name="temperature">The current temperature on success.</param>
+        /// <param name="temperature">The current temperature on success (raw double, not rounded).</param>
         /// <returns>True if the read succeeded, false otherwise.</returns>
-        bool GetTemperature(out uint temperature);
+        bool GetTemperature(out double temperature);
 
         /// <summary>
         /// Sets the power limit for the GPU.

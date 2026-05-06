@@ -181,7 +181,7 @@ public class DashboardDataProviderTests
     public void Events_CollectedOnStateChange()
     {
         var device = CreateDevice();
-        device.SetTemperatureSequence(new uint[] { 60, 60, 80, 80 });
+        device.SetTemperatureSequence(new double[] { 60, 60, 80, 80 });
         var (controller, provider) = CreatePipeline(device);
 
         controller.Step();
@@ -196,7 +196,7 @@ public class DashboardDataProviderTests
     public void Events_RespectsCapacity()
     {
         var device = CreateDevice();
-        device.SetTemperatureSequence(Enumerable.Repeat(80u, 20));
+        device.SetTemperatureSequence(Enumerable.Repeat(80.0, 20));
         var (controller, provider) = CreatePipeline(device, eventCapacity: 5);
 
         for (int i = 0; i < 10; i++)
@@ -210,7 +210,7 @@ public class DashboardDataProviderTests
     public void GetEvents_ReturnsUpToRequestedCount()
     {
         var device = CreateDevice();
-        device.SetTemperatureSequence(Enumerable.Repeat(80u, 20));
+        device.SetTemperatureSequence(Enumerable.Repeat(80.0, 20));
         var (controller, provider) = CreatePipeline(device);
 
         for (int i = 0; i < 5; i++)
@@ -226,7 +226,7 @@ public class DashboardDataProviderTests
     public void Snapshot_IsControlling_TrueAfterTrigger()
     {
         var device = CreateDevice();
-        device.SetTemperatureSequence(new uint[] { 60, 80 });
+        device.SetTemperatureSequence(new double[] { 60, 80 });
         var (controller, provider) = CreatePipeline(device);
 
         controller.Step(60);
@@ -240,7 +240,7 @@ public class DashboardDataProviderTests
     public void Snapshot_PidCycles_Increments()
     {
         var device = CreateDevice();
-        device.SetTemperatureSequence(Enumerable.Repeat(80u, 5));
+        device.SetTemperatureSequence(Enumerable.Repeat(80.0, 5));
         var (controller, provider) = CreatePipeline(device);
 
         controller.Step(80);
@@ -255,7 +255,7 @@ public class DashboardDataProviderTests
     {
         var device = CreateDevice();
         var config = CreateConfig(targetTemp: 75, triggerTemp: 80, exitHysteresis: 2);
-        device.SetTemperatureSequence(new uint[] { 60, 80, 80, 70 });
+        device.SetTemperatureSequence(new double[] { 60, 80, 80, 70 });
         var (controller, provider) = CreatePipeline(device, config);
 
         controller.Step(60);
@@ -281,7 +281,7 @@ public class DashboardDataProviderTests
     public void Snapshot_PidComponents_PopulatedWhenControlling()
     {
         var device = CreateDevice();
-        device.SetTemperatureSequence(Enumerable.Repeat(80u, 5));
+        device.SetTemperatureSequence(Enumerable.Repeat(80.0, 5));
         var (controller, provider) = CreatePipeline(device);
 
         controller.Step(80);
@@ -294,7 +294,7 @@ public class DashboardDataProviderTests
     public void Snapshot_PollingIntervalMs_ChangesWithMode()
     {
         var device = CreateDevice();
-        device.SetTemperatureSequence(new uint[] { 60, 80 });
+        device.SetTemperatureSequence(new double[] { 60, 80 });
         var config = CreateConfig(idleSleepMs: 250, controllingSleepMs: 100);
         var (controller, provider) = CreatePipeline(device, config);
 
@@ -311,7 +311,7 @@ public class DashboardDataProviderTests
     public void Events_HaveCorrectType()
     {
         var device = CreateDevice();
-        device.SetTemperatureSequence(new uint[] { 60, 80 });
+        device.SetTemperatureSequence(new double[] { 60, 80 });
         var (controller, provider) = CreatePipeline(device);
 
         controller.Step(60);
@@ -326,7 +326,7 @@ public class DashboardDataProviderTests
     public void Events_HaveTemperatureAndPower()
     {
         var device = CreateDevice();
-        device.SetTemperatureSequence(new uint[] { 60, 80 });
+        device.SetTemperatureSequence(new double[] { 60, 80 });
         var (controller, provider) = CreatePipeline(device);
 
         controller.Step(60);
@@ -390,7 +390,7 @@ public class DashboardDataProviderTests
     public void EventLogged_EventFiresOnStateChange()
     {
         var device = CreateDevice();
-        device.SetTemperatureSequence(new uint[] { 60, 80 });
+        device.SetTemperatureSequence(new double[] { 60, 80 });
         var (controller, provider) = CreatePipeline(device);
 
         bool fired = false;

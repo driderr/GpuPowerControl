@@ -13,7 +13,7 @@ namespace GpuThermalController.Core
             _lookaheadSeconds = lookaheadSeconds;
         }
 
-        public TriggerResult Evaluate(uint currentTemp, double derivative, bool isControlling)
+        public TriggerResult Evaluate(double currentTemp, double derivative, bool isControlling)
         {
             if (isControlling)
                 return TriggerResult.None;

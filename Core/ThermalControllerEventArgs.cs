@@ -19,13 +19,13 @@ namespace GpuThermalController.Core
     /// </summary>
     public class ThermalControllerEventArgs : EventArgs
     {
-        public uint Temperature { get; }
+        public double Temperature { get; }
         public int PowerLimit { get; }
         public bool IsControlling { get; }
         public string? Message { get; }
         public ControllerEventType EventType { get; }
 
-        public ThermalControllerEventArgs(uint temperature, int powerLimit, bool isControlling, ControllerEventType eventType, string? message = null)
+        public ThermalControllerEventArgs(double temperature, int powerLimit, bool isControlling, ControllerEventType eventType, string? message = null)
         {
             Temperature = temperature;
             PowerLimit = powerLimit;

@@ -7,8 +7,8 @@ namespace GpuPowerControl.Tests.Mocks;
 /// </summary>
 public class MockGpuDevice : IGpuDevice
 {
-    private Func<uint>? _temperatureProvider;
-    private uint _constantTemperature;
+    private Func<double>? _temperatureProvider;
+    private double _constantTemperature;
 
     public string Name { get; }
     public int MinPower { get; }
@@ -40,7 +40,7 @@ public class MockGpuDevice : IGpuDevice
     /// <summary>
     /// Sets a constant temperature that will be returned by GetTemperature().
     /// </summary>
-    public void SetConstantTemperature(uint temp)
+    public void SetConstantTemperature(double temp)
     {
         _temperatureProvider = null;
         _constantTemperature = temp;
@@ -50,7 +50,7 @@ public class MockGpuDevice : IGpuDevice
     /// Sets a sequence of temperatures that will be returned in order by GetTemperature().
     /// When exhausted, the last value is repeated.
     /// </summary>
-    public void SetTemperatureSequence(IEnumerable<uint> temps)
+    public void SetTemperatureSequence(IEnumerable<double> temps)
     {
         var list = temps.ToList();
         int index = 0;
@@ -66,12 +66,12 @@ public class MockGpuDevice : IGpuDevice
     /// <summary>
     /// Sets a custom function that provides temperature on each GetTemperature() call.
     /// </summary>
-    public void SetTemperatureProvider(Func<uint> provider)
+    public void SetTemperatureProvider(Func<double> provider)
     {
         _temperatureProvider = provider;
     }
 
-    public bool GetTemperature(out uint temperature)
+    public bool GetTemperature(out double temperature)
     {
         if (GetTemperatureShouldFail)
         {
