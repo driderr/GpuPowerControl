@@ -16,7 +16,7 @@ namespace GpuThermalController.Core
         public double Kd { get; set; } = 2.5;
 
         // PID anti-windup limits
-        public double IntegralMax { get; set; } = 250;
+        public double IntegralMax { get; set; } = 500;
         public double IntegralMin { get; set; } = -50;
 
         // Conditional integration: only accumulate integral within this band around target
