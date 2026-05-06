@@ -45,3 +45,6 @@ dotnet-counters
 dotnet-trace
 dotnet-dump
 
+## Data exports and logs
+data/
+
