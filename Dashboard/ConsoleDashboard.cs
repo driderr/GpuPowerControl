@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text;
 using System.Threading;
 using Spectre.Console;
 using Spectre.Console.Rendering;
@@ -11,14 +10,13 @@ namespace GpuThermalController.Dashboard;
 /// <summary>
 /// Renders a live-updating console dashboard using Spectre.Console.
 /// Consumes IDashboardDataProvider for all data (decoupled from controller).
-/// Optimized: structural widgets are created once and mutated each frame.
+/// Uses a single mutable Table + ctx.Refresh() for efficient rendering.
 /// </summary>
 public class ConsoleDashboard : IDisposable
 {
     private readonly IDashboardDataProvider _provider;
     private readonly IAnsiConsole _console;
     private volatile bool _isRunning;
-    // Use long for Interlocked operations (Interlocked.Read requires ref long)
     private long _showLogFlag = 1;
     private long _showConfigFlag;
     private long _jsonEnabledFlag;
@@ -27,51 +25,41 @@ public class ConsoleDashboard : IDisposable
     private readonly List<ErrorEntry> _collectedErrors = new();
     private const int MaxLogEntries = 23;
 
-    // === Cached immutable Style objects (never change) ===
+    // === Cached immutable Style objects ===
     private static readonly Style sStyleYellow = new(Color.Yellow);
-    private static readonly Style sStyleRed = new(Color.Red);
-    private static readonly Style sStyleGreen = new(Color.Green);
     private static readonly Style sStyleCyan = new(Color.Cyan);
     private static readonly Style sStyleGray = new(Color.Gray);
+    private static readonly Style sStyleGreen = new(Color.Green);
     private static readonly Style sStyleMagenta = new(Color.Magenta);
     private static readonly Style sStyleBlue = new(Color.Blue);
-    private static readonly Style sDimGrayStyle = Style.Parse("dim");
 
     // === Cached spacing/structural renderables ===
-    private static readonly Text sNewline = new("\n");
     private static readonly Text sBlankLine = new("");
 
     // === Footer text (never changes) ===
     private static readonly Markup sFooterMarkup = new("[gray]Q:Quit  L:Log  J:JSON  E:CSV  H:Config  P:PID  T:TestErr[/]");
 
-    // === Pre-created structural widgets ===
-    // Note: Panels and Grids cannot be mutated (no Content property, no Rows.Clear),
-    // so they are created fresh each frame. Tables CAN be reused via Rows.Clear().
+    // === Single mutable dashboard table ===
+    private readonly Table _dashboardTable;
 
-    // Stats table (4 rows max, reusable via Rows.Clear)
+    // Reusable tables for stats, PID, config
     private readonly Table _statsTable = CreateZeroPaddedTable();
-
-    // PID table (4 rows max, reusable via Rows.Clear)
     private readonly Table _pidTable = CreateZeroPaddedTable();
-
-    // Config table (7 rows max, reusable via Rows.Clear)
     private readonly Table _configTable = new Table().Border(TableBorder.Rounded).AddColumn("Parameter").AddColumn("Value");
 
-    // Log rule (reused each frame - Rule is immutable but the same title)
+    // Log rule (reused each frame)
     private readonly Rule _logRule = new("[bold]Event Log[/]");
 
-    // Waiting for data message (reused when history is empty)
+    // Waiting for data message
     private readonly Markup _waitingForDataMarkup = new("[dim]Waiting for data...[/]");
+
+    // Reusable lists
+    private readonly List<float> _chartValues = new(80);
 
     private static Table CreateZeroPaddedTable()
         => new Table().Border(TableBorder.None).HideHeaders()
             .AddColumn(new TableColumn("").Padding(0, 0))
             .AddColumn(new TableColumn("").Padding(0, 0));
-
-    // === Reusable lists (avoid allocation) ===
-    private readonly List<IRenderable> _renderables = new(32);
-    private readonly List<IRenderable> _leftContent = new(16);
-    private readonly List<float> _chartValues = new(80);
 
     public ConsoleDashboard(IDashboardDataProvider provider)
         : this(provider, AnsiConsole.Create(new AnsiConsoleSettings
@@ -82,17 +70,20 @@ public class ConsoleDashboard : IDisposable
     {
     }
 
-    /// <summary>Creates a dashboard with a specific console instance (for testing).</summary>
     public ConsoleDashboard(IDashboardDataProvider provider, IAnsiConsole console)
     {
         _provider = provider;
         _console = console;
+
+        // Create single dashboard table with two columns
+        _dashboardTable = new Table().HideHeaders().Border(TableBorder.None);
+        _dashboardTable.AddColumn(new TableColumn("").Padding(0, 0));
+        _dashboardTable.AddColumn(new TableColumn("").Padding(0, 0));
     }
 
     /// <summary>Start the dashboard display.</summary>
     public void Start()
     {
-        // Check if console output is redirected before rendering
         if (System.Console.IsOutputRedirected)
         {
             _console.WriteLine("[dim]Non-interactive console detected. Dashboard rendering disabled.[/]");
@@ -124,7 +115,7 @@ public class ConsoleDashboard : IDisposable
     {
         _renderThread = new Thread(() =>
         {
-            _console.Live(new Rows())
+            _console.Live(_dashboardTable)
                 .Overflow(VerticalOverflow.Visible)
                 .Start(ctx =>
                 {
@@ -133,7 +124,7 @@ public class ConsoleDashboard : IDisposable
                         try
                         {
                             RenderFrame();
-                            ctx.UpdateTarget(new Rows(_renderables));
+                            ctx.Refresh();
                         }
                         catch (Exception ex)
                         {
@@ -153,7 +144,7 @@ public class ConsoleDashboard : IDisposable
 
     private void RenderFrame()
     {
-        // Drain pending errors from ErrorConsole into persistent list
+        // Drain pending errors
         var drained = ErrorConsole.DrainPending();
         foreach (var entry in drained)
             _collectedErrors.Add(entry);
@@ -161,16 +152,18 @@ public class ConsoleDashboard : IDisposable
         var config = _provider.Config;
         var current = _provider.Current;
 
-        // Clear reusable collections
-        _renderables.Clear();
-        _leftContent.Clear();
+        // Clear and rebuild rows
+        _dashboardTable.Rows.Clear();
 
         // === HEADER ===
-        _renderables.Add(new Rule($"[bold green]GpuPowerControl[/] - {Markup.Escape(config.GpuName)}"));
-        _renderables.Add(new Markup($"[gray]Uptime: {FormatTimespan(current.Uptime)}[/]"));
+        _dashboardTable.AddRow(
+            new Rule($"[bold green]GpuPowerControl[/] - {Markup.Escape(config.GpuName)}"),
+            sBlankLine);
+        _dashboardTable.AddRow(
+            new Markup($"[gray]Uptime: {FormatTimespan(current.Uptime)}[/]"),
+            sBlankLine);
 
         // === STATE & POWER ===
-        // Panels cannot be mutated (no Content property), create fresh each frame.
         var stateColor = current.IsControlling ? Color.Yellow
             : current.EventType == Core.ControllerEventType.Emergency ? Color.Red
             : current.EventType == Core.ControllerEventType.Stable ? Color.Green
@@ -186,44 +179,41 @@ public class ConsoleDashboard : IDisposable
             BorderStyle = sStyleYellow,
             Border = BoxBorder.Rounded
         };
-
-        var statePowerGrid = new Grid();
-        statePowerGrid.AddColumn();
-        statePowerGrid.AddColumn(new GridColumn { Width = 22 });
-        statePowerGrid.AddRow(statePanel, powerPanel);
-        _renderables.Add(statePowerGrid);
+        _dashboardTable.AddRow(statePanel, powerPanel);
 
         // === TEMPERATURE BAR ===
-        _renderables.Add(sNewline);
-        _renderables.Add(new Markup($"Temp: [bold]{current.Temperature:F1}C[/]  |  Target: {config.TargetTemp}C  |  Trigger: {config.TriggerTemp}C  |  Emergency: {config.EmergencyTemp}C"));
-        _renderables.Add(CreateTempBar(current.Temperature, config));
+        _dashboardTable.AddRow(sBlankLine, sBlankLine);
+        _dashboardTable.AddRow(
+            new Markup($"Temp: [bold]{current.Temperature:F1}C[/]  |  Target: {config.TargetTemp}C  |  Trigger: {config.TriggerTemp}C  |  Emergency: {config.EmergencyTemp}C"),
+            sBlankLine);
+        _dashboardTable.AddRow(CreateTempBar(current.Temperature, config), sBlankLine);
 
         // === POWER BAR ===
-        _renderables.Add(sNewline);
-        _renderables.Add(new Markup($"Power: [bold]{current.CurrentPowerLimit}W[/]  |  Range: {config.MinPower}W - {config.MaxPower}W"));
-        _renderables.Add(CreatePowerBar(current, config));
+        _dashboardTable.AddRow(sBlankLine, sBlankLine);
+        _dashboardTable.AddRow(
+            new Markup($"Power: [bold]{current.CurrentPowerLimit}W[/]  |  Range: {config.MinPower}W - {config.MaxPower}W"),
+            sBlankLine);
+        _dashboardTable.AddRow(CreatePowerBar(current, config), sBlankLine);
 
-        // === MAIN BODY ===
-        // Grid.Rows is IReadOnlyList (no Clear), so create fresh each frame.
-        BuildLeftContent(current, config);
-
-        var bodyGrid = new Grid();
-        bodyGrid.AddColumn(new GridColumn());
-        bodyGrid.AddColumn(new GridColumn { Width = 100 });
-        bodyGrid.AddRow(new Rows(_leftContent), BuildHistoryColumn(_provider.GetHistory(80)));
-        _renderables.Add(bodyGrid);
+        // === MAIN BODY (two columns) ===
+        _dashboardTable.AddRow(sBlankLine, sBlankLine);
+        _dashboardTable.AddRow(
+            BuildLeftContent(current, config),
+            BuildHistoryColumn(_provider.GetHistory(80)));
 
         // === EVENT LOG ===
-        BuildLogContent(_provider.GetEvents(MaxLogEntries));
+        _dashboardTable.AddRow(sBlankLine, sBlankLine);
+        _dashboardTable.AddRow(BuildLogRenderable(_provider.GetEvents(MaxLogEntries)), sBlankLine);
 
         // === FOOTER ===
-        _renderables.Add(sNewline);
-        _renderables.Add(sFooterMarkup);
+        _dashboardTable.AddRow(sBlankLine, sBlankLine);
+        _dashboardTable.AddRow(sFooterMarkup, sBlankLine);
     }
 
-    private void BuildLeftContent(MetricsSnapshot current, DashboardConfig config)
+    private IRenderable BuildLeftContent(MetricsSnapshot current, DashboardConfig config)
     {
-        _leftContent.Add(sNewline);
+        var items = new List<IRenderable>();
+        items.Add(sBlankLine);
 
         // Stats table - mutate rows
         _statsTable.Rows.Clear();
@@ -234,26 +224,26 @@ public class ConsoleDashboard : IDisposable
         _statsTable.AddRow("PID Cycles:", $"{current.PidCycles}");
         _statsTable.AddRow("Transitions:", $"{current.StateTransitions}");
         _statsTable.AddRow("Polling:", $"{current.PollingIntervalMs}ms");
-        _leftContent.Add(_statsTable);
+        items.Add(_statsTable);
 
         // PID breakdown
         if (current.IsControlling && (current.PidP != 0 || current.PidI != 0 || current.PidD != 0))
         {
-            _leftContent.Add(sNewline);
-            _leftContent.Add(new Markup("[bold]PID Breakdown:[/]"));
+            items.Add(sBlankLine);
+            items.Add(new Markup("[bold]PID Breakdown:[/]"));
 
             _pidTable.Rows.Clear();
             _pidTable.AddRow("P:", $"[magenta]{current.PidP:+0.0;-0.0;0.0}[/]");
             _pidTable.AddRow("I:", $"[blue]{current.PidI:+0.0;-0.0;0.0}[/]");
             _pidTable.AddRow("D:", $"[green]{current.PidD:+0.0;-0.0;0.0}[/]");
             _pidTable.AddRow("Integral:", $"[gray]{current.PidIntegral:+0.0;-0.0;0.0}[/]");
-            _leftContent.Add(_pidTable);
+            items.Add(_pidTable);
         }
 
         // Config table (toggleable)
         if (Interlocked.Read(ref _showConfigFlag) != 0)
         {
-            _leftContent.Add(sNewline);
+            items.Add(sBlankLine);
             _configTable.Rows.Clear();
             _configTable.AddRow("Kp", config.Kp.ToString("F1"));
             _configTable.AddRow("Ki", config.Ki.ToString("F1"));
@@ -262,18 +252,15 @@ public class ConsoleDashboard : IDisposable
             _configTable.AddRow("Trigger", $"{config.TriggerTemp}C");
             _configTable.AddRow("Emergency", $"{config.EmergencyTemp}C");
             _configTable.AddRow("Power Range", $"{config.MinPower}W - {config.MaxPower}W");
-            _leftContent.Add(_configTable);
+            items.Add(_configTable);
         }
 
         // JSON status
-        _leftContent.Add(sNewline);
+        items.Add(sBlankLine);
         var jsonLabel = Interlocked.Read(ref _jsonEnabledFlag) != 0 ? "[green]ON[/]" : "[gray]OFF[/]";
-        _leftContent.Add(new Markup($"JSON Publishing: {jsonLabel}  |  Read Failures: {current.ReadFailures}"));
-    }
+        items.Add(new Markup($"JSON Publishing: {jsonLabel}  |  Read Failures: {current.ReadFailures}"));
 
-    private void BuildRightContent(MetricsSnapshot current, DashboardConfig config)
-    {
-        // Right content is built inline in RenderFrame via BuildHistoryColumn
+        return new Rows(items);
     }
 
     private IRenderable CreateTempBar(double temp, DashboardConfig config)
@@ -306,7 +293,6 @@ public class ConsoleDashboard : IDisposable
     {
         if (history.Count < 5) return _waitingForDataMarkup;
 
-        // Reuse chart values list
         _chartValues.Clear();
         foreach (var h in history) _chartValues.Add((float)h.Temperature);
         var tempChart = BuildAsciiChart(_chartValues, "C", Color.Cyan, minPadding: 2, minRange: 5, chartHeight: 6, chartWidth: 80, axisLabel: "→");
@@ -315,7 +301,6 @@ public class ConsoleDashboard : IDisposable
         foreach (var h in history) _chartValues.Add((float)h.CurrentPowerLimit);
         var powerChart = BuildAsciiChart(_chartValues, "W", Color.Yellow, minPadding: 10, minRange: 20, chartHeight: 6, chartWidth: 80, axisLabel: "→");
 
-        // Return as a Rows renderable (allocated once per frame, contains ~4 items)
         return new Rows(
             new Markup("[bold]Temperature History[/]"),
             tempChart,
@@ -324,10 +309,6 @@ public class ConsoleDashboard : IDisposable
             powerChart);
     }
 
-    /// <summary>
-    /// Builds an ASCII bar chart as a SegmentString.
-    /// Merged from BuildAsciiChart + BuildNarrowAsciiChart.
-    /// </summary>
     private static IRenderable BuildAsciiChart(
         List<float> values, string unit, Color barColor,
         float minPadding, float minRange, int chartHeight, int chartWidth,
@@ -364,13 +345,6 @@ public class ConsoleDashboard : IDisposable
         return new SegmentString(segments, sliced.Count + 10);
     }
 
-    private void BuildLogContent(IReadOnlyList<DashboardEvent> events)
-    {
-        _renderables.Add(sNewline);
-        _renderables.Add(BuildLogRenderable(events));
-    }
-
-    /// <summary>Builds the event log content as a Rows renderable.</summary>
     private IRenderable BuildLogRenderable(IReadOnlyList<DashboardEvent> events)
     {
         var items = new List<IRenderable>();
@@ -382,7 +356,6 @@ public class ConsoleDashboard : IDisposable
             return new Rows(items);
         }
 
-        // Merge errors and controller events into one chronological list
         var allEntries = new List<LogLine>();
 
         foreach (var err in _collectedErrors)
@@ -416,16 +389,13 @@ public class ConsoleDashboard : IDisposable
             return new Rows(items);
         }
 
-        // Sort by timestamp ascending (oldest first), then take the most recent MaxLogEntries
         allEntries.Sort((a, b) => a.Timestamp.CompareTo(b.Timestamp));
         if (allEntries.Count > MaxLogEntries)
             allEntries = allEntries.Skip(allEntries.Count - MaxLogEntries).ToList();
 
-        // Bound the collected errors list to prevent unbounded growth
         while (_collectedErrors.Count > MaxLogEntries)
             _collectedErrors.RemoveAt(0);
 
-        // Render oldest first (top) to newest (bottom)
         foreach (var line in allEntries)
         {
             var timeStr = line.Timestamp.ToString("HH:mm:ss");
@@ -435,22 +405,18 @@ public class ConsoleDashboard : IDisposable
         return new Rows(items);
     }
 
-    /// <summary>Simple record for a unified log line.</summary>
     private record LogLine(DateTime Timestamp, string ColorName, string Text);
 
-    /// <summary>Toggle event log visibility.</summary>
     public void ToggleLog()
     {
         Interlocked.Exchange(ref _showLogFlag, Interlocked.Read(ref _showLogFlag) != 0 ? 0 : 1);
     }
 
-    /// <summary>Toggle config display.</summary>
     public void ToggleConfig()
     {
         Interlocked.Exchange(ref _showConfigFlag, Interlocked.Read(ref _showConfigFlag) != 0 ? 0 : 1);
     }
 
-    /// <summary>Update JSON publishing status (for display).</summary>
     public void SetJsonStatus(bool enabled)
     {
         Interlocked.Exchange(ref _jsonEnabledFlag, enabled ? 1 : 0);
@@ -476,9 +442,6 @@ public class ConsoleDashboard : IDisposable
     }
 }
 
-/// <summary>
-/// Simple IRenderable that renders a pre-built list of segments.
-/// </summary>
 public class SegmentString : IRenderable
 {
     private readonly Segment[] _segments;
