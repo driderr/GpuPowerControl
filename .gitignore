@@ -32,3 +32,13 @@ _*Rd_*
 
 ## Generated diagrams (from .mmd sources)
 *.svg
+
+## Profiling results (artifacts, not source)
+Profiling/results/*
+!Profiling/results/.gitkeep
+
+## Dotnet tool wrappers (auto-generated)
+Profiling/dotnet-counters
+Profiling/dotnet-trace
+Profiling/dotnet-dump
+
