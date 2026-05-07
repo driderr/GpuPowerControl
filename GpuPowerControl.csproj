@@ -6,7 +6,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <NoWarn>NU1904</NoWarn>
-    <ApplicationIcon>assets/gpu-power-icon.ico</ApplicationIcon>
+    <ApplicationIcon>assets/gpu-thermo-icon.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>
@@ -19,13 +19,13 @@
   </ItemGroup>
 
   <ItemGroup>
-    <None Include="assets/gpu-power-icon.png">
+    <None Include="assets/gpu-thermo-icon.png">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
   </ItemGroup>
 
   <ItemGroup>
-    <Content Include="assets/gpu-power-icon.ico">
+    <Content Include="assets/gpu-thermo-icon.ico">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
   </ItemGroup>
