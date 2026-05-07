@@ -48,4 +48,7 @@ dotnet-dump
 ## Data exports and logs
 data/
 
+## Publish output (generated single-file exe)
+publish/
+
 

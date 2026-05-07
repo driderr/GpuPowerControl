@@ -7,6 +7,12 @@
     <Nullable>enable</Nullable>
     <NoWarn>NU1904</NoWarn>
     <ApplicationIcon>Assets/gpu-thermo-icon.ico</ApplicationIcon>
+    <!-- Self-contained single-file publish settings -->
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <UseAppHost>true</UseAppHost>
+    <IncludeSourceMapping>false</IncludeSourceMapping>
+    <DebuggerAttributes>false</DebuggerAttributes>
   </PropertyGroup>
 
   <ItemGroup>
