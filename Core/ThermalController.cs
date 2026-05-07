@@ -2,6 +2,7 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 using GpuThermalController.Interfaces;
+using GpuThermalController.Notifications;
 
 namespace GpuThermalController.Core
 {
@@ -109,6 +110,11 @@ namespace GpuThermalController.Core
                     ControllerEventType.Emergency,
                     $"[EMERGENCY] Temp hit {currentTemp}C! Forcing minimum power limit ({_device.MinPower}W).");
 
+                // Emergency toast notification
+                ToastNotificationService.ShowErrorToast(
+                    "EMERGENCY - Critical Temperature!",
+                    $"GPU temperature: {currentTemp:F1}C (Emergency threshold: {_config.EmergencyTemp}C). Power limited to {_device.MinPower}W.");
+
                 // Start emergency hold timer and enter recovery mode
                 _emergencyHoldUntil = TimeProvider().AddMilliseconds(_config.EmergencyHoldMs);
                 _isEmergencyRecovering = true;
@@ -158,6 +164,11 @@ namespace GpuThermalController.Core
                             : $"[SAFETY TRIGGER] Temp hit {currentTemp}C. Engaging PID control.";
 
                         RaiseEvent(currentTemp, _currentPowerLimit, _isControlling, ControllerEventType.Trigger, msg);
+
+                        // Trigger toast notification
+                        ToastNotificationService.ShowWarningToast(
+                            "Thermal Trigger Activated",
+                            $"Temperature {currentTemp:F1}C exceeded threshold. PID control engaged.");
                     }
                 }
             }
@@ -244,6 +255,11 @@ namespace GpuThermalController.Core
                     RaiseEvent(currentTemp, _currentPowerLimit, _isControlling,
                         ControllerEventType.Stable,
                         $"[STABLE] Temp settled at {currentTemp}C. Full power restored. Returning to idle monitoring.");
+
+                    // Stable toast notification
+                    ToastNotificationService.ShowInfoToast(
+                        "Temperature Stable",
+                        $"GPU temperature: {currentTemp:F1}C. Control disengaged. Full power restored.");
                 }
             }
 

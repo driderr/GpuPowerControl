@@ -7,6 +7,7 @@ using GpuThermalController.Core;
 using GpuThermalController.Dashboard;
 using GpuThermalController.Interfaces;
 using GpuThermalController.Nvml;
+using GpuThermalController.Notifications;
 
 namespace GpuThermalController
 {
@@ -113,6 +114,12 @@ namespace GpuThermalController
 
                 device = SelectGpu();
             }
+
+            // Initialize toast notifications
+            ToastNotificationService.Initialize();
+            // Enable notifications for this run (default is disabled to prevent test spam)
+            ToastNotificationService.SetConfig(new NotificationConfig { Enabled = true });
+            //ToastNotificationService.ShowInfoToast("GpuPowerControl", "Application started");
 
             var config = new ThermalControllerConfig();
 
@@ -244,11 +251,14 @@ namespace GpuThermalController
                 cancellationTokenSource.Cancel();
             }
 
-            try
-            {
-                // Start dashboard first (it renders immediately with initial empty data)
-                dashboard.Start();
-                keyHandler.Start();
+             try
+             {
+                 // Start dashboard first (it renders immediately with initial empty data)
+                 dashboard.Start();
+                 keyHandler.Start();
+
+                // Show startup toast after dashboard is running
+                //ToastNotificationService.ShowInfoToast("Dashboard Active", "Press ESC to quit, P to adjust PID");
 
                 // Small delay to let dashboard initialize
                 Thread.Sleep(500);
@@ -256,20 +266,23 @@ namespace GpuThermalController
                 // Then start the controller
                 controller.RunAsync(cancellationTokenSource.Token).Wait();
             }
-            finally
-            {
-                // Cleanup dashboard resources
-                keyHandler.Dispose();
-                dashboard.Dispose();
-                jsonPublisher.Dispose();
-                dataProvider.Dispose();
+             finally
+             {
+                 // Cleanup dashboard resources
+                 keyHandler.Dispose();
+                 dashboard.Dispose();
+                 jsonPublisher.Dispose();
+                 dataProvider.Dispose();
 
-                if (nvmlInitialized)
-                {
-                    Console.WriteLine("\nShutting down NVML...");
-                    NVML.nvmlShutdown();
-                }
-            }
+                 if (nvmlInitialized)
+                 {
+                     Console.WriteLine("\nShutting down NVML...");
+                     NVML.nvmlShutdown();
+                 }
+
+                 // Show shutdown toast
+                 ToastNotificationService.ShowInfoToast("GpuPowerControl", "Application shut down");
+             }
         }
 
         static IGpuDevice SelectGpu()
