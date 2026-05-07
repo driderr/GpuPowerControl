@@ -1,4 +1,4 @@
-namespace GpuThermalController.Interfaces
+namespace GpuPowerControl.Devices
 {
     /// <summary>
     /// Abstracts a GPU device that can report temperature and have its power limit adjusted.

@@ -1,4 +1,4 @@
-using GpuThermalController.Interfaces;
+using GpuPowerControl.Devices;
 
 namespace GpuPowerControl.Tests.Mocks;
 

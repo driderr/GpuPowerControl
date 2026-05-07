@@ -33,6 +33,12 @@ _*Rd_*
 ## Generated diagrams (from .mmd sources)
 *.svg
 
+## Assets (icon generation scripts)
+Assets/*.py
+
+## Interfaces directory (empty after move)
+Interfaces/
+
 ## Profiling results (artifacts, not source)
 Profiling/results/*
 !Profiling/results/.gitkeep
@@ -47,4 +53,5 @@ dotnet-dump
 
 ## Data exports and logs
 data/
+
 
