@@ -1,7 +1,7 @@
 using System;
-using GpuThermalController.Interfaces;
+using GpuPowerControl.Devices;
 
-namespace GpuThermalController.Core
+namespace GpuPowerControl.Devices
 {
     /// <summary>
     /// Preset workload profiles for simulated GPU operation.

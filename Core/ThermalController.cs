@@ -1,7 +1,7 @@
 using System;
 using System.Threading;
 using System.Threading.Tasks;
-using GpuThermalController.Interfaces;
+using GpuPowerControl.Devices;
 using GpuThermalController.Notifications;
 
 namespace GpuThermalController.Core

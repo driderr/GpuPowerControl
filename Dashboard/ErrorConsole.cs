@@ -3,7 +3,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using Spectre.Console;
 
-namespace GpuThermalController;
+namespace GpuThermalController.Dashboard;
 
 /// <summary>
 /// Represents a pending error or warning entry.

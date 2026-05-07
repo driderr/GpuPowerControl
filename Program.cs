@@ -5,7 +5,7 @@ using System.Threading;
 using Spectre.Console;
 using GpuThermalController.Core;
 using GpuThermalController.Dashboard;
-using GpuThermalController.Interfaces;
+using GpuPowerControl.Devices;
 using GpuThermalController.Nvml;
 using GpuThermalController.Notifications;
 

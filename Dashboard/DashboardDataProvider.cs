@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using GpuThermalController.Core;
-using GpuThermalController.Interfaces;
+using GpuPowerControl.Devices;
 
 namespace GpuThermalController.Dashboard;
 

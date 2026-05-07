@@ -1,8 +1,10 @@
 using System.Text;
-using GpuThermalController.Interfaces;
+using GpuPowerControl.Devices;
+using GpuThermalController.Nvml;
+using GpuThermalController.Dashboard;
 
 
-namespace GpuThermalController.Nvml
+namespace GpuPowerControl.Devices
 {
     /// <summary>
     /// Real NVML implementation of IGpuDevice.
