@@ -6,6 +6,26 @@
 
 A real-time GPU thermal management utility that dynamically controls NVIDIA GPU power limits using a PID controller based on real-time temperature monitoring.
 
+## Table of Contents
+
+- [Description](#description)
+- [Features](#features)
+- [How It Works](#how-it-works)
+  - [Control Flow](#control-flow)
+  - [State Transitions](#state-transitions)
+  - [Safety Mechanisms](#safety-mechanisms)
+  - [PID Control Logic](#pid-control-logic)
+- [Installation](#installation)
+- [Usage](#usage)
+  - [Simulation Scenarios](#simulation-scenarios)
+  - [Dashboard Controls](#dashboard-controls)
+- [Configuration](#configuration)
+- [Architecture](#architecture)
+- [Testing](#testing)
+- [Contributing](#contributing)
+- [License](#license)
+- [Acknowledgments](#acknowledgments)
+
 ## Description
 
 GpuPowerControl solves the problem of automatic thermal management for consumer NVIDIA GPUs that lack native temperature limiting. Instead of static power limits or manual adjustment, it uses a PID (Proportional-Integral-Derivative) control loop to smoothly regulate GPU power in response to temperature changes.
