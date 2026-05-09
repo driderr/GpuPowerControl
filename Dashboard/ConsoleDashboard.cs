@@ -330,7 +330,7 @@ public class ConsoleDashboard : IDisposable
 
             foreach (var v in sliced)
             {
-                var height = (v - minVal) / range * chartHeight;
+                var height = (v - minVal) / range * (chartHeight - 1);
                 if (height > row)
                     segments.Add(new Segment("█", new Style(barColor)));
                 else
