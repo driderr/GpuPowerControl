@@ -1,13 +1,18 @@
 # GpuPowerControl
 
-[![.NET 8](https://img.shields.io/badge/.NET-8.0-purple.svg)](https://dotnet.microsoft.com/en-us/download)
+[![.NET 10](https://img.shields.io/badge/.NET-10.0-purple.svg)](https://dotnet.microsoft.com/en-us/download)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Build: Passing](https://img.shields.io/badge/build-passing-brightgreen.svg)](#)
 
 A real-time GPU thermal management utility that dynamically controls NVIDIA GPU power limits using a PID controller based on real-time temperature monitoring.
 
+## Download
+
+- **[GpuPowerControl v1.0](https://github.com/driderr/GpuPowerControl/releases/tag/v1.0)** - Latest release
+
 ## Table of Contents
 
+- [Download](#download)
 - [Description](#description)
 - [Features](#features)
 - [How It Works](#how-it-works)
@@ -103,7 +108,7 @@ Power Limit = Base Power - Kp·error - Ki·∫error·dt - Kd·d(error)/dt
 
 ### Prerequisites
 
-- **.NET 8 SDK** (https://dotnet.microsoft.com/download)
+- **.NET 10 SDK** (https://dotnet.microsoft.com/download)
 - **NVIDIA GPU** with up-to-date drivers (for NVML support)
 - **Windows 10/11** (for toast notifications)
 

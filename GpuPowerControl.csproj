@@ -13,6 +13,11 @@
     <UseAppHost>true</UseAppHost>
     <IncludeSourceMapping>false</IncludeSourceMapping>
     <DebuggerAttributes>false</DebuggerAttributes>
+    <!-- Version properties -->
+    <Version>1.0.0</Version>
+    <AssemblyVersion>1.0.0</AssemblyVersion>
+    <FileVersion>1.0.0</FileVersion>
+    <InformationalVersion>v1.0</InformationalVersion>
   </PropertyGroup>
 
   <ItemGroup>
