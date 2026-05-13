@@ -20,6 +20,7 @@ A real-time GPU thermal management utility that dynamically controls NVIDIA GPU 
   - [Simulation Scenarios](#simulation-scenarios)
   - [Dashboard Controls](#dashboard-controls)
 - [Configuration](#configuration)
+  - [External Configuration File (appsettings.json)](#external-configuration-file-appsettingsjson)
 - [Architecture](#architecture)
 - [Testing](#testing)
 - [Contributing](#contributing)
@@ -186,6 +187,46 @@ GpuPowerControl uses `ThermalControllerConfig` for all settings. Key parameters:
 | `Kd` | 2.5 | Derivative gain |
 | `IdleSleepMs` | 1500ms | Sleep interval when idle |
 | `ControllingSleepMs` | 250ms | Sleep interval when controlling |
+
+### External Configuration File (`appsettings.json`)
+
+GpuPowerControl supports an external JSON configuration file that allows you to customize all thermal control parameters without recompilation. Place `appsettings.json` in the same directory as `GpuPowerControl.exe`.
+
+#### Setup
+
+1. Copy the sample `appsettings.json` (included in the repository root) next to the executable
+2. Edit the values to match your GPU model and thermal preferences
+3. Restart the application to apply changes
+
+#### Comment Support
+
+The configuration loader strips both line comments (`//`) and block comments (`/* */`) before parsing the JSON. This allows you to annotate your configuration file with explanations for each setting:
+
+```json
+{
+  // Thermal thresholds
+  "thermal": {
+    "triggerTemp": 80,
+    "targetTemp": 75
+  }
+}
+```
+
+#### Configuration Sections
+
+The `appsettings.json` file contains the following sections:
+
+| Section | Description |
+|---------|-------------|
+| `thermal` | Temperature thresholds (trigger, target, emergency, hysteresis, predictive triggering) |
+| `pid` | PID controller tuning (Kp, Ki, Kd, integral clamping) |
+| `power` | Power limits and gating (min/max power, rate limits, adjustment intervals) |
+| `timing` | Control loop timing (PID interval, sleep durations) |
+| `faultTolerance` | Error handling (max consecutive read failures) |
+
+#### CLI Override
+
+Command-line arguments override the corresponding `appsettings.json` values. This allows you to quickly test different configurations without editing the file.
 
 ## Architecture
 
