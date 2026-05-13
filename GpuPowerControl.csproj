@@ -20,9 +20,9 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Spectre.Console" Version="0.55.2" />
-    <PackageReference Include="CommunityToolkit.WinUI.Notifications" Version="7.1.2" />
-  </ItemGroup>
+     <PackageReference Include="Spectre.Console" Version="0.55.2" />
+     <PackageReference Include="CommunityToolkit.WinUI.Notifications" Version="7.1.2" />
+   </ItemGroup>
 
   <ItemGroup>
       <None Include="Assets/gpu-thermo-icon.png">
@@ -34,6 +34,12 @@
       <Content Include="Assets/gpu-thermo-icon.ico">
         <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       </Content>
+  </ItemGroup>
+
+  <ItemGroup>
+      <None Include="appsettings.json">
+        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      </None>
   </ItemGroup>
 
 </Project>
