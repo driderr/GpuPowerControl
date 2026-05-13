@@ -20,6 +20,7 @@ namespace GpuThermalController
             
             // Parse command-line arguments
             bool simulateMode = false;
+            bool disableNotifications = false;
             string? scenarioArg = null;
             int? baseTempArg = null;
             int? peakTempArg = null;
@@ -43,6 +44,9 @@ namespace GpuThermalController
                         break;
                     case "--seed":
                         if (i + 1 < args.Length) if (int.TryParse(args[i + 1], out int sd)) seedArg = sd;
+                        break;
+                    case "--no-notifications":
+                        disableNotifications = true;
                         break;
                     case "--test-error":
                         ErrorConsole.Error("This is a test error message");
@@ -115,13 +119,13 @@ namespace GpuThermalController
                 device = SelectGpu();
             }
 
-            // Initialize toast notifications
-            ToastNotificationService.Initialize();
-            // Enable notifications for this run (default is disabled to prevent test spam)
-            ToastNotificationService.SetConfig(new NotificationConfig { Enabled = true });
-            //ToastNotificationService.ShowInfoToast("GpuPowerControl", "Application started");
+            // Load external configuration (appsettings.json)
+            ThermalControllerConfig config = ThermalControllerConfig.Load();
 
-            var config = new ThermalControllerConfig();
+            // Initialize toast notifications (default ON, use --no-notifications to disable)
+            ToastNotificationService.Initialize();
+            bool notificationsEnabled = !disableNotifications;
+            ToastNotificationService.SetConfig(new NotificationConfig { Enabled = notificationsEnabled });
 
             Console.ForegroundColor = ConsoleColor.Green;
             Console.WriteLine($"Started Thermal Controller.");
