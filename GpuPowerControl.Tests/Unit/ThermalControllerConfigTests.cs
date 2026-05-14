@@ -1,4 +1,5 @@
 using System.IO;
+using System.Text;
 using System.Text.Json;
 using GpuThermalController.Core;
 using Xunit;
@@ -524,6 +525,11 @@ public class ThermalControllerConfigTests : IDisposable
     [Fact]
     public void Load_FromMalformedJson_ReturnsDefaults()
     {
+        // Redirect Console.Out to suppress warning output for this expected error path
+        var originalOut = Console.Out;
+        var stringWriter = new StringWriter();
+        Console.SetOut(stringWriter);
+
         // Backup original file to prevent cross-test pollution
         string backupPath = _configPath + ".bak";
         if (File.Exists(_configPath))
@@ -543,6 +549,9 @@ public class ThermalControllerConfigTests : IDisposable
         }
         finally
         {
+            // Restore original console output
+            Console.SetOut(originalOut);
+
             // ALWAYS delete the malformed file and restore original
             if (File.Exists(_configPath))
                 File.Delete(_configPath);
