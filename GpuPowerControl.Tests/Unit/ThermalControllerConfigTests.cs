@@ -524,9 +524,18 @@ public class ThermalControllerConfigTests : IDisposable
     [Fact]
     public void Load_FromMalformedJson_ReturnsDefaults()
     {
-        WriteJson("{ invalid json content };");
+        // Backup original file to prevent cross-test pollution
+        string backupPath = _configPath + ".bak";
+        if (File.Exists(_configPath))
+        {
+            File.Copy(_configPath, backupPath, overwrite: true);
+            File.Delete(_configPath);
+        }
+
         try
         {
+            // Write genuinely malformed JSON to trigger the parse error path
+            File.WriteAllText(_configPath, "{ invalid json content };");
             var config = ThermalControllerConfig.Load();
             Assert.Equal(80u, config.TriggerTemp);
             Assert.Equal(75u, config.TargetTemp);
@@ -534,7 +543,14 @@ public class ThermalControllerConfigTests : IDisposable
         }
         finally
         {
-            Dispose();
+            // ALWAYS delete the malformed file and restore original
+            if (File.Exists(_configPath))
+                File.Delete(_configPath);
+            if (File.Exists(backupPath))
+            {
+                File.Copy(backupPath, _configPath, overwrite: true);
+                File.Delete(backupPath);
+            }
         }
     }
 
