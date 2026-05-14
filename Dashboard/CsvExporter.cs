@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.IO.Abstractions;
 using System.Text;
 
 namespace GpuThermalController.Dashboard;
@@ -7,12 +8,19 @@ namespace GpuThermalController.Dashboard;
 /// <summary>
 /// Exports event log to a CSV file on demand.
 /// </summary>
-public static class CsvExporter
+public class CsvExporter
 {
+    private readonly IFileSystem _fileSystem;
+
+    public CsvExporter(IFileSystem fileSystem)
+    {
+        _fileSystem = fileSystem;
+    }
+
     /// <summary>
     /// Exports the given events to a CSV file at the specified path.
     /// </summary>
-    public static void ExportToCsv(IReadOnlyList<DashboardEvent> events, string filePath)
+    public void ExportToCsv(IReadOnlyList<DashboardEvent> events, string filePath)
     {
         var sb = new StringBuilder();
         sb.AppendLine("Timestamp,Temperature,PowerLimit,IsControlling,EventType,Message");
@@ -27,10 +35,10 @@ public static class CsvExporter
         }
 
         // Ensure directory exists
-        var dir = Path.GetDirectoryName(filePath);
-        if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
-            Directory.CreateDirectory(dir);
+        var dir = _fileSystem.Path.GetDirectoryName(filePath);
+        if (!string.IsNullOrEmpty(dir) && !_fileSystem.Directory.Exists(dir))
+            _fileSystem.Directory.CreateDirectory(dir);
 
-        File.WriteAllText(filePath, sb.ToString());
+        _fileSystem.File.WriteAllText(filePath, sb.ToString());
     }
 }

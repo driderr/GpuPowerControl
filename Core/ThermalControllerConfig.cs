@@ -1,4 +1,5 @@
 using System.IO;
+using System.IO.Abstractions;
 using System.Reflection;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -63,13 +64,14 @@ public class ThermalControllerConfig
     /// Loads appsettings.json, strips comments, and merges with defaults.
     /// Uses JsonDocument for direct JSON tree traversal with reflection-based merge.
     /// </summary>
-    public static ThermalControllerConfig Load()
+    public static ThermalControllerConfig Load(IFileSystem? fileSystem = null)
     {
+        var fs = fileSystem ?? new FileSystem();
         var config = new ThermalControllerConfig();
 
         try
         {
-            string? raw = LoadRawConfig();
+            string? raw = LoadRawConfig(fs);
             if (raw != null)
             {
                 string stripped = Regex.Replace(raw, @"(?m)^[ \t]*//.*$", "");
@@ -146,16 +148,16 @@ public class ThermalControllerConfig
         return null;
     }
 
-    private static string? LoadRawConfig()
+    private static string? LoadRawConfig(IFileSystem fileSystem)
     {
         string exeDir = AppDomain.CurrentDomain.BaseDirectory;
-        string configPath = Path.Combine(exeDir, "appsettings.json");
+        string configPath = fileSystem.Path.Combine(exeDir, "appsettings.json");
 
-        if (File.Exists(configPath))
-            return File.ReadAllText(configPath);
+        if (fileSystem.File.Exists(configPath))
+            return fileSystem.File.ReadAllText(configPath);
 
-        if (File.Exists("appsettings.json"))
-            return File.ReadAllText("appsettings.json");
+        if (fileSystem.File.Exists("appsettings.json"))
+            return fileSystem.File.ReadAllText("appsettings.json");
 
         return null;
     }

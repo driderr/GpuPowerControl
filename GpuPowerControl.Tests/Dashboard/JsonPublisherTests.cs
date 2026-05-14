@@ -1,5 +1,6 @@
 using System;
-using System.IO;
+using System.IO.Abstractions;
+using System.IO.Abstractions.TestingHelpers;
 using System.Text.Json;
 using System.Threading;
 using GpuPowerControl.Tests.Mocks;
@@ -10,10 +11,11 @@ using Xunit;
 namespace GpuPowerControl.Tests;
 
 /// <summary>
-/// Tests for JsonPublisher - JSON serialization and file writing.
+/// Tests for JsonPublisher using in-memory MockFileSystem (zero disk I/O).
 /// </summary>
 public class JsonPublisherTests : IDisposable
 {
+    private readonly MockFileSystem _mockFs;
     private readonly string _testDir;
     private MockGpuDevice _device;
     private ThermalController _controller;
@@ -22,8 +24,8 @@ public class JsonPublisherTests : IDisposable
 
     public JsonPublisherTests()
     {
-        _testDir = Path.Combine(Path.GetTempPath(), $"json_pub_test_{Guid.NewGuid():N}");
-        Directory.CreateDirectory(_testDir);
+        _mockFs = new MockFileSystem();
+        _testDir = "test_output";
 
         _device = new MockGpuDevice("Test GPU", 150, 600);
         _device.SetConstantTemperature(60);
@@ -59,7 +61,7 @@ public class JsonPublisherTests : IDisposable
     public void Publisher_DefaultIsDisabled()
     {
         // Arrange & Act
-        _publisher = new JsonPublisher(_provider, _testDir);
+        _publisher = new JsonPublisher(_provider, _mockFs, _testDir);
 
         // Assert
         Assert.False(_publisher.IsEnabled);
@@ -69,7 +71,7 @@ public class JsonPublisherTests : IDisposable
     public void Enable_SetsIsEnabledToTrue()
     {
         // Arrange
-        _publisher = new JsonPublisher(_provider, _testDir);
+        _publisher = new JsonPublisher(_provider, _mockFs, _testDir);
 
         // Act
         _publisher.Enable();
@@ -82,7 +84,7 @@ public class JsonPublisherTests : IDisposable
     public void Disable_SetsIsEnabledToFalse()
     {
         // Arrange
-        _publisher = new JsonPublisher(_provider, _testDir);
+        _publisher = new JsonPublisher(_provider, _mockFs, _testDir);
         _publisher.Enable();
 
         // Act
@@ -96,7 +98,7 @@ public class JsonPublisherTests : IDisposable
     public void Toggle_FlipsState()
     {
         // Arrange
-        _publisher = new JsonPublisher(_provider, _testDir);
+        _publisher = new JsonPublisher(_provider, _mockFs, _testDir);
         Assert.False(_publisher.IsEnabled);
 
         // Act - toggle from false to true
@@ -119,7 +121,7 @@ public class JsonPublisherTests : IDisposable
     {
         // Arrange
         _controller.Step(60);
-        _publisher = new JsonPublisher(_provider, _testDir);
+        _publisher = new JsonPublisher(_provider, _mockFs, _testDir);
         _publisher.Enable();
 
         // Act - trigger a write by calling Start briefly
@@ -128,10 +130,10 @@ public class JsonPublisherTests : IDisposable
         _publisher.Dispose();
 
         // Assert
-        var metricsFile = Path.Combine(_testDir, "metrics.json");
-        Assert.True(File.Exists(metricsFile));
+        var metricsFile = _mockFs.Path.Combine(_testDir, "metrics.json");
+        Assert.True(_mockFs.File.Exists(metricsFile));
 
-        var json = File.ReadAllText(metricsFile);
+        var json = _mockFs.File.ReadAllText(metricsFile);
         var snapshot = JsonSerializer.Deserialize<MetricsSnapshot>(json, new JsonSerializerOptions
         {
             ReadCommentHandling = JsonCommentHandling.Skip
@@ -148,17 +150,17 @@ public class JsonPublisherTests : IDisposable
         _controller.Step(61);
         _controller.Step(62);
 
-        _publisher = new JsonPublisher(_provider, _testDir);
+        _publisher = new JsonPublisher(_provider, _mockFs, _testDir);
         _publisher.Enable();
         _publisher.Start(enabled: true);
         Thread.Sleep(600);
         _publisher.Dispose();
 
         // Assert
-        var historyFile = Path.Combine(_testDir, "history.json");
-        Assert.True(File.Exists(historyFile));
+        var historyFile = _mockFs.Path.Combine(_testDir, "history.json");
+        Assert.True(_mockFs.File.Exists(historyFile));
 
-        var json = File.ReadAllText(historyFile);
+        var json = _mockFs.File.ReadAllText(historyFile);
         var history = JsonSerializer.Deserialize<MetricsSnapshot[]>(json);
         Assert.NotNull(history);
         // History should have entries (may be 1 due to poll timing)
@@ -170,7 +172,7 @@ public class JsonPublisherTests : IDisposable
     {
         // Arrange
         _controller.Step(60);
-        _publisher = new JsonPublisher(_provider, _testDir);
+        _publisher = new JsonPublisher(_provider, _mockFs, _testDir);
         // Start with enabled: false (default)
 
         // Act
@@ -179,8 +181,8 @@ public class JsonPublisherTests : IDisposable
         _publisher.Dispose();
 
         // Assert - no files should be created
-        var metricsFile = Path.Combine(_testDir, "metrics.json");
-        Assert.False(File.Exists(metricsFile));
+        var metricsFile = _mockFs.Path.Combine(_testDir, "metrics.json");
+        Assert.False(_mockFs.File.Exists(metricsFile));
     }
 
     // --- Edge Cases ---
@@ -189,21 +191,21 @@ public class JsonPublisherTests : IDisposable
     public void Publisher_CreatesOutputDirectory()
     {
         // Arrange
-        var newDir = Path.Combine(_testDir, "subdir");
-        Assert.False(Directory.Exists(newDir));
+        var newDir = _mockFs.Path.Combine(_testDir, "subdir");
+        Assert.False(_mockFs.Directory.Exists(newDir));
 
         // Act
-        _publisher = new JsonPublisher(_provider, newDir);
+        _publisher = new JsonPublisher(_provider, _mockFs, newDir);
 
         // Assert
-        Assert.True(Directory.Exists(newDir));
+        Assert.True(_mockFs.Directory.Exists(newDir));
     }
 
     [Fact]
     public void Dispose_StopsBackgroundThread()
     {
         // Arrange
-        _publisher = new JsonPublisher(_provider, _testDir);
+        _publisher = new JsonPublisher(_provider, _mockFs, _testDir);
         _publisher.Start(enabled: true);
         Thread.Sleep(600);
 
@@ -225,14 +227,15 @@ public class JsonPublisherTests : IDisposable
     {
         // Arrange
         _controller.Step(60);
-        _publisher = new JsonPublisher(_provider, _testDir);
+        _publisher = new JsonPublisher(_provider, _mockFs, _testDir);
         _publisher.Enable();
         _publisher.Start(enabled: true);
         Thread.Sleep(600);
         _publisher.Dispose();
 
         // Assert
-        var json = File.ReadAllText(Path.Combine(_testDir, "metrics.json"));
+        var metricsFile = _mockFs.Path.Combine(_testDir, "metrics.json");
+        var json = _mockFs.File.ReadAllText(metricsFile);
         Assert.Contains("\"Temperature\"", json);
         Assert.Contains("\"CurrentPowerLimit\"", json);
         Assert.Contains("\"IsControlling\"", json);
@@ -241,7 +244,6 @@ public class JsonPublisherTests : IDisposable
     public void Dispose()
     {
         _publisher?.Dispose();
-        if (Directory.Exists(_testDir))
-            Directory.Delete(_testDir, recursive: true);
+        // No cleanup needed with MockFileSystem - no physical files to delete
     }
 }

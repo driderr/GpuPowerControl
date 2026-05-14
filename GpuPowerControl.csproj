@@ -25,9 +25,10 @@
   </ItemGroup>
 
   <ItemGroup>
-     <PackageReference Include="Spectre.Console" Version="0.55.2" />
-     <PackageReference Include="CommunityToolkit.WinUI.Notifications" Version="7.1.2" />
-   </ItemGroup>
+      <PackageReference Include="Spectre.Console" Version="0.55.2" />
+      <PackageReference Include="CommunityToolkit.WinUI.Notifications" Version="7.1.2" />
+      <PackageReference Include="System.IO.Abstractions" Version="19.0.1" />
+    </ItemGroup>
 
   <ItemGroup>
       <None Include="Assets/gpu-thermo-icon.png">

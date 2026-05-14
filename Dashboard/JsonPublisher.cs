@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.IO.Abstractions;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Threading;
@@ -15,6 +16,7 @@ public class JsonPublisher : IDisposable
     private readonly string _metricsFile;
     private readonly string _historyFile;
     private readonly IDashboardDataProvider _provider;
+    private readonly IFileSystem _fileSystem;
     private readonly object _writeLock = new();
     private volatile bool _isEnabled;
     private volatile bool _isRunning;
@@ -23,15 +25,16 @@ public class JsonPublisher : IDisposable
     /// <summary>Whether JSON publishing is currently active.</summary>
     public bool IsEnabled => _isEnabled;
 
-    public JsonPublisher(IDashboardDataProvider provider, string outputDirectory = "data")
+    public JsonPublisher(IDashboardDataProvider provider, IFileSystem fileSystem, string outputDirectory = "data")
     {
         _provider = provider;
-        _metricsFile = Path.Combine(outputDirectory, "metrics.json");
-        _historyFile = Path.Combine(outputDirectory, "history.json");
+        _fileSystem = fileSystem;
+        _metricsFile = _fileSystem.Path.Combine(outputDirectory, "metrics.json");
+        _historyFile = _fileSystem.Path.Combine(outputDirectory, "history.json");
 
         // Ensure output directory exists
-        if (!Directory.Exists(outputDirectory))
-            Directory.CreateDirectory(outputDirectory);
+        if (!_fileSystem.Directory.Exists(outputDirectory))
+            _fileSystem.Directory.CreateDirectory(outputDirectory);
     }
 
     /// <summary>Start the publisher (default: disabled, toggle with Enable/Disable).</summary>
@@ -84,12 +87,12 @@ public class JsonPublisher : IDisposable
                 // Write current metrics snapshot
                 var current = _provider.Current;
                 var metricsJson = JsonSerializer.Serialize(current, JsonOptions);
-                File.WriteAllText(_metricsFile, metricsJson);
+                _fileSystem.File.WriteAllText(_metricsFile, metricsJson);
 
                 // Write history (last 2400 samples)
                 var history = _provider.GetHistory(2400);
                 var historyJson = JsonSerializer.Serialize(history, JsonOptions);
-                File.WriteAllText(_historyFile, historyJson);
+                _fileSystem.File.WriteAllText(_historyFile, historyJson);
             }
             catch
             {

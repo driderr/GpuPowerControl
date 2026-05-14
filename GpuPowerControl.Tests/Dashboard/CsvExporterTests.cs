@@ -1,6 +1,6 @@
 using System.Collections.Generic;
-using System.IO;
-using System.Linq;
+using System.IO.Abstractions;
+using System.IO.Abstractions.TestingHelpers;
 using GpuThermalController.Core;
 using GpuThermalController.Dashboard;
 using Xunit;
@@ -8,10 +8,19 @@ using Xunit;
 namespace GpuPowerControl.Tests;
 
 /// <summary>
-/// Tests for CsvExporter static class.
+/// Tests for CsvExporter class using in-memory MockFileSystem (zero disk I/O).
 /// </summary>
 public class CsvExporterTests
 {
+    private MockFileSystem _mockFs;
+    private CsvExporter _exporter;
+
+    public CsvExporterTests()
+    {
+        _mockFs = new MockFileSystem();
+        _exporter = new CsvExporter(_mockFs);
+    }
+
     private DashboardEvent CreateEvent(
         DateTime? timestamp = null,
         double temperature = 75.0,
@@ -37,24 +46,17 @@ public class CsvExporterTests
     {
         // Arrange
         var events = new List<DashboardEvent> { CreateEvent(message: "System started") };
-        var tempFile = Path.Combine(Path.GetTempPath(), $"csv_export_test_{Guid.NewGuid():N}.csv");
+        var filePath = "temp/export_test_001.csv";
 
-        try
-        {
-            // Act
-            CsvExporter.ExportToCsv(events, tempFile);
+        // Act
+        _exporter.ExportToCsv(events, filePath);
 
-            // Assert
-            Assert.True(File.Exists(tempFile));
-            var lines = File.ReadAllLines(tempFile);
-            Assert.Equal(2, lines.Length); // header + 1 data line
-            Assert.Equal("Timestamp,Temperature,PowerLimit,IsControlling,EventType,Message", lines[0]);
-            Assert.Contains("System started", lines[1]);
-        }
-        finally
-        {
-            if (File.Exists(tempFile)) File.Delete(tempFile);
-        }
+        // Assert
+        Assert.True(_mockFs.File.Exists(filePath));
+        var lines = _mockFs.File.ReadAllLines(filePath);
+        Assert.Equal(2, lines.Length); // header + 1 data line
+        Assert.Equal("Timestamp,Temperature,PowerLimit,IsControlling,EventType,Message", lines[0]);
+        Assert.Contains("System started", lines[1]);
     }
 
     [Fact]
@@ -67,21 +69,14 @@ public class CsvExporterTests
             CreateEvent(temperature: 80, message: "Hot"),
             CreateEvent(temperature: 95, message: "Emergency")
         };
-        var tempFile = Path.Combine(Path.GetTempPath(), $"csv_export_test_{Guid.NewGuid():N}.csv");
+        var filePath = "temp/export_test_002.csv";
 
-        try
-        {
-            // Act
-            CsvExporter.ExportToCsv(events, tempFile);
+        // Act
+        _exporter.ExportToCsv(events, filePath);
 
-            // Assert
-            var lines = File.ReadAllLines(tempFile);
-            Assert.Equal(4, lines.Length); // header + 3 data lines
-        }
-        finally
-        {
-            if (File.Exists(tempFile)) File.Delete(tempFile);
-        }
+        // Assert
+        var lines = _mockFs.File.ReadAllLines(filePath);
+        Assert.Equal(4, lines.Length); // header + 3 data lines
     }
 
     // --- Edge Cases ---
@@ -91,22 +86,15 @@ public class CsvExporterTests
     {
         // Arrange
         var events = new List<DashboardEvent>();
-        var tempFile = Path.Combine(Path.GetTempPath(), $"csv_export_test_{Guid.NewGuid():N}.csv");
+        var filePath = "temp/export_test_003.csv";
 
-        try
-        {
-            // Act
-            CsvExporter.ExportToCsv(events, tempFile);
+        // Act
+        _exporter.ExportToCsv(events, filePath);
 
-            // Assert
-            var lines = File.ReadAllLines(tempFile);
-            Assert.Single(lines);
-            Assert.Equal("Timestamp,Temperature,PowerLimit,IsControlling,EventType,Message", lines[0]);
-        }
-        finally
-        {
-            if (File.Exists(tempFile)) File.Delete(tempFile);
-        }
+        // Assert
+        var lines = _mockFs.File.ReadAllLines(filePath);
+        Assert.Single(lines);
+        Assert.Equal("Timestamp,Temperature,PowerLimit,IsControlling,EventType,Message", lines[0]);
     }
 
     [Fact]
@@ -117,23 +105,15 @@ public class CsvExporterTests
         {
             CreateEvent(message: "He said \"hello\"")
         };
-        var tempFile = Path.Combine(Path.GetTempPath(), $"csv_export_test_{Guid.NewGuid():N}.csv");
+        var filePath = "temp/export_test_004.csv";
 
-        try
-        {
-            // Act
-            CsvExporter.ExportToCsv(events, tempFile);
+        // Act
+        _exporter.ExportToCsv(events, filePath);
 
-            // Assert
-            var lines = File.ReadAllLines(tempFile);
-            var dataLine = lines[1];
-            // The message should be wrapped in quotes, with internal quotes doubled
-            Assert.Contains("\"He said \"\"hello\"\"\"", dataLine);
-        }
-        finally
-        {
-            if (File.Exists(tempFile)) File.Delete(tempFile);
-        }
+        // Assert
+        var lines = _mockFs.File.ReadAllLines(filePath);
+        var dataLine = lines[1];
+        Assert.Contains("\"He said \"\"hello\"\"\"", dataLine);
     }
 
     [Fact]
@@ -144,22 +124,15 @@ public class CsvExporterTests
         {
             CreateEvent(message: "temp high, reducing power")
         };
-        var tempFile = Path.Combine(Path.GetTempPath(), $"csv_export_test_{Guid.NewGuid():N}.csv");
+        var filePath = "temp/export_test_005.csv";
 
-        try
-        {
-            // Act
-            CsvExporter.ExportToCsv(events, tempFile);
+        // Act
+        _exporter.ExportToCsv(events, filePath);
 
-            // Assert
-            var lines = File.ReadAllLines(tempFile);
-            var dataLine = lines[1];
-            Assert.Contains("\"temp high, reducing power\"", dataLine);
-        }
-        finally
-        {
-            if (File.Exists(tempFile)) File.Delete(tempFile);
-        }
+        // Assert
+        var lines = _mockFs.File.ReadAllLines(filePath);
+        var dataLine = lines[1];
+        Assert.Contains("\"temp high, reducing power\"", dataLine);
     }
 
     [Fact]
@@ -170,45 +143,31 @@ public class CsvExporterTests
         {
             CreateEvent(message: null)
         };
-        var tempFile = Path.Combine(Path.GetTempPath(), $"csv_export_test_{Guid.NewGuid():N}.csv");
+        var filePath = "temp/export_test_006.csv";
 
-        try
-        {
-            // Act
-            CsvExporter.ExportToCsv(events, tempFile);
+        // Act
+        _exporter.ExportToCsv(events, filePath);
 
-            // Assert
-            var lines = File.ReadAllLines(tempFile);
-            var dataLine = lines[1];
-            Assert.Contains("\"\"", dataLine);
-        }
-        finally
-        {
-            if (File.Exists(tempFile)) File.Delete(tempFile);
-        }
+        // Assert
+        var lines = _mockFs.File.ReadAllLines(filePath);
+        var dataLine = lines[1];
+        Assert.Contains("\"\"", dataLine);
     }
 
     [Fact]
     public void ExportToCsv_CreatesDirectoryIfNotExists()
     {
         // Arrange
-        var tempDir = Path.Combine(Path.GetTempPath(), $"csv_test_dir_{Guid.NewGuid():N}");
-        var tempFile = Path.Combine(tempDir, "output.csv");
+        var filePath = "new_dir/output.csv";
         var events = new List<DashboardEvent> { CreateEvent() };
+        Assert.False(_mockFs.Directory.Exists("new_dir"));
 
-        try
-        {
-            // Act
-            CsvExporter.ExportToCsv(events, tempFile);
+        // Act
+        _exporter.ExportToCsv(events, filePath);
 
-            // Assert
-            Assert.True(Directory.Exists(tempDir));
-            Assert.True(File.Exists(tempFile));
-        }
-        finally
-        {
-            if (Directory.Exists(tempDir)) Directory.Delete(tempDir, recursive: true);
-        }
+        // Assert
+        Assert.True(_mockFs.Directory.Exists("new_dir"));
+        Assert.True(_mockFs.File.Exists(filePath));
     }
 
     [Fact]
@@ -219,22 +178,15 @@ public class CsvExporterTests
         {
             CreateEvent(isControlling: true, temperature: 82, powerLimit: 350, eventType: ControllerEventType.Trigger)
         };
-        var tempFile = Path.Combine(Path.GetTempPath(), $"csv_export_test_{Guid.NewGuid():N}.csv");
+        var filePath = "temp/export_test_009.csv";
 
-        try
-        {
-            // Act
-            CsvExporter.ExportToCsv(events, tempFile);
+        // Act
+        _exporter.ExportToCsv(events, filePath);
 
-            // Assert
-            var lines = File.ReadAllLines(tempFile);
-            var dataLine = lines[1];
-            Assert.Contains(",True,", dataLine);
-        }
-        finally
-        {
-            if (File.Exists(tempFile)) File.Delete(tempFile);
-        }
+        // Assert
+        var lines = _mockFs.File.ReadAllLines(filePath);
+        var dataLine = lines[1];
+        Assert.Contains(",True,", dataLine);
     }
 
     [Fact]
@@ -245,22 +197,15 @@ public class CsvExporterTests
         {
             CreateEvent(isControlling: false)
         };
-        var tempFile = Path.Combine(Path.GetTempPath(), $"csv_export_test_{Guid.NewGuid():N}.csv");
+        var filePath = "temp/export_test_010.csv";
 
-        try
-        {
-            // Act
-            CsvExporter.ExportToCsv(events, tempFile);
+        // Act
+        _exporter.ExportToCsv(events, filePath);
 
-            // Assert
-            var lines = File.ReadAllLines(tempFile);
-            var dataLine = lines[1];
-            Assert.Contains(",False,", dataLine);
-        }
-        finally
-        {
-            if (File.Exists(tempFile)) File.Delete(tempFile);
-        }
+        // Assert
+        var lines = _mockFs.File.ReadAllLines(filePath);
+        var dataLine = lines[1];
+        Assert.Contains(",False,", dataLine);
     }
 
     [Fact]
@@ -271,22 +216,15 @@ public class CsvExporterTests
         {
             CreateEvent(eventType: ControllerEventType.Warning)
         };
-        var tempFile = Path.Combine(Path.GetTempPath(), $"csv_export_test_{Guid.NewGuid():N}.csv");
+        var filePath = "temp/export_test_011.csv";
 
-        try
-        {
-            // Act
-            CsvExporter.ExportToCsv(events, tempFile);
+        // Act
+        _exporter.ExportToCsv(events, filePath);
 
-            // Assert
-            var lines = File.ReadAllLines(tempFile);
-            var dataLine = lines[1];
-            Assert.Contains(",Warning,", dataLine);
-        }
-        finally
-        {
-            if (File.Exists(tempFile)) File.Delete(tempFile);
-        }
+        // Assert
+        var lines = _mockFs.File.ReadAllLines(filePath);
+        var dataLine = lines[1];
+        Assert.Contains(",Warning,", dataLine);
     }
 
     [Fact]
@@ -298,22 +236,14 @@ public class CsvExporterTests
         {
             CreateEvent(timestamp: specificTime)
         };
-        var tempFile = Path.Combine(Path.GetTempPath(), $"csv_export_test_{Guid.NewGuid():N}.csv");
+        var filePath = "temp/export_test_012.csv";
 
-        try
-        {
-            // Act
-            CsvExporter.ExportToCsv(events, tempFile);
+        // Act
+        _exporter.ExportToCsv(events, filePath);
 
-            // Assert
-            var lines = File.ReadAllLines(tempFile);
-            var dataLine = lines[1];
-            // Timestamp is formatted with :O (round-trip ISO format)
-            Assert.Contains("2025-03-15T10:30:00", dataLine);
-        }
-        finally
-        {
-            if (File.Exists(tempFile)) File.Delete(tempFile);
-        }
+        // Assert
+        var lines = _mockFs.File.ReadAllLines(filePath);
+        var dataLine = lines[1];
+        Assert.Contains("2025-03-15T10:30:00", dataLine);
     }
 }

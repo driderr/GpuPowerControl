@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.IO.Abstractions;
 using System.Security.Principal;
 using System.Threading;
 using Spectre.Console;
@@ -153,8 +154,11 @@ namespace GpuThermalController
             // 2. Create the console dashboard (renders to terminal)
             var dashboard = new ConsoleDashboard(dataProvider);
 
+            // Create file system abstraction
+            IFileSystem fileSystem = new FileSystem();
+
             // 3. Create the JSON publisher (writes to disk, togglable)
-            var jsonPublisher = new JsonPublisher(dataProvider);
+            var jsonPublisher = new JsonPublisher(dataProvider, fileSystem);
             jsonPublisher.Start(enabled: false);
 
             // 4. Create the key handler (keyboard shortcuts)
@@ -182,6 +186,9 @@ namespace GpuThermalController
                 dashboard.SetJsonStatus(jsonPublisher.IsEnabled);
             };
 
+            // Create CSV exporter instance
+            var csvExporter = new CsvExporter(fileSystem);
+
             // P4: CSV export on background thread to avoid blocking the key handler thread
             keyHandler.ExportCsvRequested += () =>
             {
@@ -192,7 +199,7 @@ namespace GpuThermalController
                     {
                         var timestamp = DateTime.UtcNow.ToString("yyyyMMdd-HHmmss-fff");
                         var filePath = $"data/export-{timestamp}.csv";
-                        CsvExporter.ExportToCsv(events, filePath);
+                        csvExporter.ExportToCsv(events, filePath);
                     }
                     catch (Exception ex)
                     {
