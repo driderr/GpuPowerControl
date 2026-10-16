@@ -12,6 +12,8 @@ namespace GpuPowerControl.Tests
         [InlineData(150, 150, 600, 5, 155)] // already at the floor: probe slightly above
         [InlineData(2, 1, 95, 5, 1)]        // low-power GPU near its floor: probe at the floor
         [InlineData(95, 95, 95, 5, 95)]     // zero-width range: only one value possible
+        [InlineData(100, 1, 95, 5, 95)]     // restore target above the hardware max: clamp down
+        [InlineData(0, 1, 95, 5, 1)]        // restore target below the hardware floor: clamp up
         public void ChooseProbeTarget_PicksARealChangeWithinTheHardwareRange(
             int restoreW, int minW, int maxW, int stepW, int expected)
         {
@@ -26,6 +28,24 @@ namespace GpuPowerControl.Tests
         public void ReadbackMatches_RespectsTolerance(int readW, int requestedW, int toleranceW, bool expected)
         {
             Assert.Equal(expected, PowerProbePlanner.ReadbackMatches(readW, requestedW, toleranceW));
+        }
+
+        [Theory]
+        // Regression: nvmlErrorString() returns title-case text ("Not Supported"), not
+        // the uppercase enum names, so hint matching must be case-insensitive and must
+        // match the real message format (issue #1 laptop scenario).
+        [InlineData("NVML nvmlDeviceSetPowerManagementLimit failed: Not Supported", true, false)]
+        [InlineData("NVML nvmlDeviceSetPowerManagementLimit failed: NOT_SUPPORTED", true, false)]
+        [InlineData("NVML nvmlDeviceSetPowerManagementLimit failed: Not Permitted", false, true)]
+        [InlineData("NVML nvmlDeviceSetPowerManagementLimit failed: NVML_ERROR_NOT_PERMITTED", false, true)]
+        [InlineData("NVML nvmlDeviceSetPowerManagementLimit failed: Unknown driver state", false, false)]
+        [InlineData(null, false, false)]
+        public void FailureHint_MatchesNvmlErrorStringTitleCaseAndEnumNames(
+            string? error, bool expectNotSupportedHint, bool expectNotPermittedHint)
+        {
+            string hint = PowerProbePlanner.FailureHint(error);
+            Assert.Equal(expectNotSupportedHint, hint.Contains("firmware"));
+            Assert.Equal(expectNotPermittedHint, hint.Contains("Administrator"));
         }
     }
 
@@ -55,6 +75,11 @@ namespace GpuPowerControl.Tests
             var result = gpu.ProbePowerControl();
             Assert.True(result.CanControlPower);
             Assert.Contains("confirmed", result.Detail);
+            // The round-trip must probe 5 W below the starting limit (600 W) and then
+            // actually restore it - a regression that drops the restore call is caught here.
+            Assert.Equal(2, gpu.PowerLimitCalls.Count);
+            Assert.Equal(595, gpu.PowerLimitCalls[0]);
+            Assert.Equal(600, gpu.PowerLimitCalls.Last());
         }
     }
 }

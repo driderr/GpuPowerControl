@@ -23,6 +23,10 @@
   <ItemGroup>
     <Compile Remove="GpuPowerControl.Tests\**\*.cs" />
   </ItemGroup>
+  <ItemGroup>
+    <!-- Lets the unit test project set internal-only state (e.g. CrashLogger.LogFilePath). -->
+    <InternalsVisibleTo Include="GpuPowerControl.Tests" />
+  </ItemGroup>
 
   <ItemGroup>
       <PackageReference Include="Spectre.Console" Version="0.55.2" />

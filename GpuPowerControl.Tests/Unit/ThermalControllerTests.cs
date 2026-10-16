@@ -1123,33 +1123,42 @@ public class ThermalControllerTests
     [Fact]
     public async Task RunAsync_DeviceThrowsInGetTemperature_FaultsGracefullyWithoutKillingProcess()
     {
-        // Disable toasts for this test (registry + toast creation is a machine side effect)
+        // Disable toasts for this test (registry + toast creation is a machine side
+        // effect); save the previous config and restore it so no state leaks to other
+        // tests running in the same process.
+        NotificationConfig previousToastConfig = ToastNotificationService.Config;
         ToastNotificationService.SetConfig(new NotificationConfig { Enabled = false });
+        try
+        {
+            var config = new ThermalControllerConfig { IdleSleepMs = 50 };
+            var device = new MockGpuDevice(minPower: 1, maxPower: 95);
+            device.GetTemperatureShouldThrow = true;
+            var pid = new PidController(config.Kp, config.Ki, config.Kd, config.TargetTemp,
+                config.EffectiveMaxPower(device.MaxPower), config.EffectiveMinPower(device.MinPower, device.MaxPower),
+                config.IntegralMax, config.IntegralMin, config.IntegralBand, config.MinimumDt);
+            var trigger = new TriggerEvaluator(config.TriggerTemp, config.PredictiveFloor, config.LookaheadSeconds);
+            var controller = new ThermalController(device, pid, trigger, config);
 
-        var config = new ThermalControllerConfig { IdleSleepMs = 50 };
-        var device = new MockGpuDevice(minPower: 1, maxPower: 95);
-        device.GetTemperatureShouldThrow = true;
-        var pid = new PidController(config.Kp, config.Ki, config.Kd, config.TargetTemp,
-            config.EffectiveMaxPower(device.MaxPower), config.EffectiveMinPower(device.MinPower, device.MaxPower),
-            config.IntegralMax, config.IntegralMin, config.IntegralBand, config.MinimumDt);
-        var trigger = new TriggerEvaluator(config.TriggerTemp, config.PredictiveFloor, config.LookaheadSeconds);
-        var controller = new ThermalController(device, pid, trigger, config);
+            var events = new List<ThermalControllerEventArgs>();
+            controller.OnStateChange += (_, e) => events.Add(e);
 
-        var events = new List<ThermalControllerEventArgs>();
-        controller.OnStateChange += (_, e) => events.Add(e);
+            using var cts = new CancellationTokenSource();
+            Task runTask = controller.RunAsync(cts.Token);
 
-        using var cts = new CancellationTokenSource();
-        Task runTask = controller.RunAsync(cts.Token);
+            // MainLoop must catch the driver-level exception, report a fault, and stop
+            // (the task completes instead of faulting and taking the process down).
+            var completed = await Task.WhenAny(runTask, Task.Delay(TimeSpan.FromSeconds(5)));
+            Assert.True(ReferenceEquals(runTask, completed),
+                "Control loop task should complete after a fault");
+            await runTask;
+            Assert.True(controller.Faulted);
+            Assert.Contains(events, e => e.EventType == ControllerEventType.Warning);
 
-        // MainLoop must catch the driver-level exception, report a fault, and stop
-        // (the task completes instead of faulting and taking the process down).
-        var completed = await Task.WhenAny(runTask, Task.Delay(TimeSpan.FromSeconds(5)));
-        Assert.True(ReferenceEquals(runTask, completed),
-            "Control loop task should complete after a fault");
-        await runTask;
-        Assert.True(controller.Faulted);
-        Assert.Contains(events, e => e.EventType == ControllerEventType.Warning);
-
-        cts.Cancel();
+            cts.Cancel();
+        }
+        finally
+        {
+            ToastNotificationService.SetConfig(previousToastConfig);
+        }
     }
 }

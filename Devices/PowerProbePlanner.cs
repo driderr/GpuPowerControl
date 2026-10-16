@@ -26,5 +26,23 @@ namespace GpuPowerControl.Devices
         /// </summary>
         public static bool ReadbackMatches(int readW, int requestedW, int toleranceW = 1)
             => Math.Abs(readW - requestedW) <= toleranceW;
+        /// <summary>
+        /// User-facing hint for a failed power limit set, derived from the NVML error
+        /// text. nvmlErrorString() returns title-case text ("Not Supported",
+        /// "Not Permitted"), so matching is case-insensitive; the raw enum names are
+        /// also accepted in case the message format ever changes.
+        /// </summary>
+        public static string FailureHint(string? nvmlError)
+        {
+            if (nvmlError is null)
+                return string.Empty;
+            if (nvmlError.Contains("Not Supported", StringComparison.OrdinalIgnoreCase)
+                || nvmlError.Contains("NOT_SUPPORTED", StringComparison.OrdinalIgnoreCase))
+                return " On many laptop GPUs the power budget is owned by firmware (NVIDIA Dynamic Boost or OEM performance profiles) and cannot be changed by software.";
+            if (nvmlError.Contains("Not Permitted", StringComparison.OrdinalIgnoreCase)
+                || nvmlError.Contains("NOT_PERMITTED", StringComparison.OrdinalIgnoreCase))
+                return " Try running this application as Administrator.";
+            return string.Empty;
+        }
     }
 }

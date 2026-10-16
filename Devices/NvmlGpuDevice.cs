@@ -130,11 +130,9 @@ namespace GpuPowerControl.Devices
             int probeW = PowerProbePlanner.ChooseProbeTarget(restoreW, MinPower, MaxPower, stepW);
             if (!SetPowerLimit(probeW, out string? setError))
             {
-                string hint = string.Empty;
-                if (setError != null && setError.Contains("NOT_SUPPORTED"))
-                    hint = " On many laptop GPUs the power budget is owned by firmware (NVIDIA Dynamic Boost or OEM performance profiles) and cannot be changed by software.";
-                else if (setError != null && setError.Contains("NOT_PERMITTED"))
-                    hint = " Try running this application as Administrator.";
+                // nvmlErrorString() reports title-case text (e.g. "Not Supported"), so
+                // hint matching must be case-insensitive (see PowerProbePlanner.FailureHint).
+                string hint = PowerProbePlanner.FailureHint(setError);
                 return PowerProbeResult.Failure(
                     $"The driver rejected the test power limit change: {setError}.{hint} " +
                     "This GPU cannot be power-limited, so thermal protection is not possible on this machine.");

@@ -45,6 +45,10 @@ public static class ToastNotificationService
     {
         _config = config ?? new NotificationConfig();
     }
+    /// <summary>
+    /// Current notification configuration (readable so tests can save and restore it).
+    /// </summary>
+    public static NotificationConfig Config => _config;
 
     /// <summary>
     /// Displays a toast notification with the specified title, message, and severity.

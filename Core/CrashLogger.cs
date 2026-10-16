@@ -12,8 +12,8 @@ public static class CrashLogger
 {
     private static readonly object _lock = new();
 
-    /// <summary>Path of the crash log file (next to the executable).</summary>
-    public static string LogFilePath { get; } =
+    /// <summary>Path of the crash log file (next to the executable). Settable for tests.</summary>
+    public static string LogFilePath { get; internal set; } =
         Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "crash-log.txt");
 
     /// <summary>

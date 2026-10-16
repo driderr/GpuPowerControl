@@ -164,6 +164,15 @@ namespace GpuThermalController
                     $"({config.DefaultMinPower}W) is at or above this GPU's effective maximum ({maxPower}W), so PID control " +
                     $"cannot lower the power limit at all. Lower defaultMinPower in appsettings.json to enable control.");
 
+            // Single exit path for post-init startup failures: NVML is shut down exactly
+            // once and the process exits non-zero (ExitCode rather than Exit() so a
+            // posted toast notification still gets the chance to display).
+            void ExitAfterStartupFailure()
+            {
+                if (nvmlInitialized)
+                    NVML.nvmlShutdown();
+                Environment.ExitCode = 1;
+            }
             // A configured maximum below the hardware minimum leaves no valid operating
             // envelope - refuse to start with an actionable message.
             if (maxPower < device.MinPower)
@@ -172,6 +181,9 @@ namespace GpuThermalController
                 Console.WriteLine($"ERROR: Invalid power envelope: defaultMaxPower ({config.DefaultMaxPower}W) is below the " +
                     $"GPU's hardware minimum ({device.MinPower}W). Increase defaultMaxPower to at least {device.MinPower}W in appsettings.json.");
                 Console.ResetColor();
+                ToastNotificationService.ShowErrorToast("Invalid power envelope",
+                    $"defaultMaxPower ({config.DefaultMaxPower}W) is below the GPU's hardware minimum ({device.MinPower}W). Increase defaultMaxPower in appsettings.json.");
+                ExitAfterStartupFailure();
                 return;
             }
 
@@ -184,22 +196,39 @@ namespace GpuThermalController
             // floor on the very first PID cycle (common on low-power GPUs using desktop
             // gains). Advisory only - control still clamps safely within the envelope.
             int envelopeWidth = maxPower - minPower;
-            double firstCycleCut = config.Kp * (config.TriggerTemp - config.TargetTemp);
-            if (envelopeWidth > 0 && firstCycleCut >= envelopeWidth)
+            // Guard against a nonsensical config (trigger below target): a uint
+            // subtraction would underflow and produce garbage in the advisory text.
+            if (config.TriggerTemp > config.TargetTemp)
             {
-                double suggestedKp = Math.Round(envelopeWidth / (double)(config.TriggerTemp - config.TargetTemp), 1);
-                Console.ForegroundColor = ConsoleColor.Yellow;
-                Console.WriteLine($"Warning: with Kp={config.Kp} the first PID cycle will drive power to the " +
-                    $"{minPower}W floor (Kp x {config.TriggerTemp - config.TargetTemp}C = {firstCycleCut:F0}W on a " +
-                    $"{envelopeWidth}W envelope). Consider lowering Kp to ~{suggestedKp} for smoother control.");
-                Console.ResetColor();
+                double firstCycleCut = config.Kp * (config.TriggerTemp - config.TargetTemp);
+                if (envelopeWidth > 0 && firstCycleCut >= envelopeWidth)
+                {
+                    double suggestedKp = Math.Round(envelopeWidth / (double)(config.TriggerTemp - config.TargetTemp), 1);
+                    Console.ForegroundColor = ConsoleColor.Yellow;
+                    Console.WriteLine($"Warning: with Kp={config.Kp} the first PID cycle will drive power to the " +
+                        $"{minPower}W floor (Kp x {config.TriggerTemp - config.TargetTemp}C = {firstCycleCut:F0}W on a " +
+                        $"{envelopeWidth}W envelope). Consider lowering Kp to ~{suggestedKp} for smoother control.");
+                    Console.ResetColor();
+                }
             }
 
             // Startup capability probe: confirm this GPU can actually be power-limited
             // (set a test limit, read it back, restore it) before the control loop is
             // allowed to run. We do not want to discover at the moment of a thermal
             // emergency that power control was never available on this machine.
-            var probe = device.ProbePowerControl();
+            PowerProbeResult probe;
+            try
+            {
+                probe = device.ProbePowerControl();
+            }
+            catch (Exception ex)
+            {
+                // A device implementation may throw (the current NvmlGpuDevice wraps all
+                // P/Invokes, but future implementations may not). Never let that crash
+                // Main with NVML still initialized - route it through the normal
+                // probe-failure path instead.
+                probe = PowerProbeResult.Failure($"The power control check threw an exception: {ex.Message}");
+            }
             if (!probe.CanControlPower)
             {
                 Console.ForegroundColor = ConsoleColor.Red;
@@ -215,8 +244,7 @@ namespace GpuThermalController
                 Console.WriteLine("==========================================================");
                 Console.ResetColor();
                 ToastNotificationService.ShowErrorToast("Power control unavailable", probe.Detail);
-                if (nvmlInitialized)
-                    NVML.nvmlShutdown();
+                ExitAfterStartupFailure();
                 return;
             }
             Console.ForegroundColor = ConsoleColor.Green;
