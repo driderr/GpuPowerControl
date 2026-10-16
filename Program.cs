@@ -18,6 +18,18 @@ namespace GpuThermalController
         {
             // Set console title for profiling scripts to identify this process
             Console.Title = "GpuPowerControl";
+
+            // Top-level crash capture: unhandled exceptions (e.g. from the control loop or
+            // background threads) are written to crash-log.txt next to the executable so
+            // they can be diagnosed even when the Live dashboard owns the console.
+            AppDomain.CurrentDomain.UnhandledException += (sender, e) =>
+                CrashLogger.Log(e.ExceptionObject as Exception,
+                    $"Unhandled exception (AppDomain, terminating={e.IsTerminating})");
+            TaskScheduler.UnobservedTaskException += (sender, e) =>
+            {
+                e.SetObserved();
+                CrashLogger.Log(e.Exception, "Unobserved task exception");
+            };
             
             // Parse command-line arguments
             bool simulateMode = false;
@@ -123,6 +135,13 @@ namespace GpuThermalController
             // Load external configuration (appsettings.json)
             ThermalControllerConfig config = ThermalControllerConfig.Load();
 
+            // Resolve the operating power envelope: configured limits clamped to the
+            // hardware range reported by NVML. Desktop defaults on a small-GPU laptop
+            // (e.g. 150W-600W on a 1W-95W card) would otherwise make the PID controller
+            // clamp to the hardware floor on its first cycle.
+            int maxPower = config.EffectiveMaxPower(device.MaxPower);
+            int minPower = config.EffectiveMinPower(device.MinPower, device.MaxPower);
+
             // Initialize toast notifications (default ON, use --no-notifications to disable)
             ToastNotificationService.Initialize();
             bool notificationsEnabled = !disableNotifications;
@@ -132,14 +151,77 @@ namespace GpuThermalController
             Console.WriteLine($"Started Thermal Controller.");
             Console.WriteLine($"Device: {device.Name}");
             Console.WriteLine($"Trigger: {config.TriggerTemp}C | Target Stability: {config.TargetTemp}C | Emergency Limit: {config.EmergencyTemp}C");
-            Console.WriteLine($"Power Range: {device.MinPower}W - {device.MaxPower}W");
+            Console.WriteLine($"Power Range (hardware): {device.MinPower}W - {device.MaxPower}W");
+            Console.WriteLine($"Power Range (operating): {minPower}W - {maxPower}W");
             Console.ResetColor();
+
+            if (maxPower != config.DefaultMaxPower)
+                Console.WriteLine($"Note: defaultMaxPower ({config.DefaultMaxPower}W) clamped to {maxPower}W to fit the hardware range.");
+            if (minPower != config.DefaultMinPower)
+                Console.WriteLine($"Note: defaultMinPower ({config.DefaultMinPower}W) clamped to {minPower}W to fit the hardware range.");
+            if (minPower >= maxPower)
+                Console.WriteLine($"Warning: zero-width operating envelope ({minPower}W - {maxPower}W): defaultMinPower " +
+                    $"({config.DefaultMinPower}W) is at or above this GPU's effective maximum ({maxPower}W), so PID control " +
+                    $"cannot lower the power limit at all. Lower defaultMinPower in appsettings.json to enable control.");
+
+            // A configured maximum below the hardware minimum leaves no valid operating
+            // envelope - refuse to start with an actionable message.
+            if (maxPower < device.MinPower)
+            {
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.WriteLine($"ERROR: Invalid power envelope: defaultMaxPower ({config.DefaultMaxPower}W) is below the " +
+                    $"GPU's hardware minimum ({device.MinPower}W). Increase defaultMaxPower to at least {device.MinPower}W in appsettings.json.");
+                Console.ResetColor();
+                return;
+            }
 
             var pidController = new PidController(
                 config.Kp, config.Ki, config.Kd,
-                config.TargetTemp, device.MaxPower, device.MinPower,
+                config.TargetTemp, maxPower, minPower,
                 config.IntegralMax, config.IntegralMin, config.IntegralBand, config.MinimumDt);
 
+            // Warn when the proportional gain alone would drive power to the operating
+            // floor on the very first PID cycle (common on low-power GPUs using desktop
+            // gains). Advisory only - control still clamps safely within the envelope.
+            int envelopeWidth = maxPower - minPower;
+            double firstCycleCut = config.Kp * (config.TriggerTemp - config.TargetTemp);
+            if (envelopeWidth > 0 && firstCycleCut >= envelopeWidth)
+            {
+                double suggestedKp = Math.Round(envelopeWidth / (double)(config.TriggerTemp - config.TargetTemp), 1);
+                Console.ForegroundColor = ConsoleColor.Yellow;
+                Console.WriteLine($"Warning: with Kp={config.Kp} the first PID cycle will drive power to the " +
+                    $"{minPower}W floor (Kp x {config.TriggerTemp - config.TargetTemp}C = {firstCycleCut:F0}W on a " +
+                    $"{envelopeWidth}W envelope). Consider lowering Kp to ~{suggestedKp} for smoother control.");
+                Console.ResetColor();
+            }
+
+            // Startup capability probe: confirm this GPU can actually be power-limited
+            // (set a test limit, read it back, restore it) before the control loop is
+            // allowed to run. We do not want to discover at the moment of a thermal
+            // emergency that power control was never available on this machine.
+            var probe = device.ProbePowerControl();
+            if (!probe.CanControlPower)
+            {
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.WriteLine("==========================================================");
+                Console.WriteLine("  !! POWER CONTROL IS NOT AVAILABLE ON THIS GPU !!");
+                Console.WriteLine("==========================================================");
+                Console.WriteLine($"  {probe.Detail}");
+                Console.WriteLine();
+                Console.WriteLine("  This program exists to lower GPU power when the GPU gets");
+                Console.WriteLine("  too hot. Since power limiting does not work on this machine,");
+                Console.WriteLine("  starting it would give false confidence that the GPU is");
+                Console.WriteLine("  protected. The control loop will NOT start.");
+                Console.WriteLine("==========================================================");
+                Console.ResetColor();
+                ToastNotificationService.ShowErrorToast("Power control unavailable", probe.Detail);
+                if (nvmlInitialized)
+                    NVML.nvmlShutdown();
+                return;
+            }
+            Console.ForegroundColor = ConsoleColor.Green;
+            Console.WriteLine($"Power control check: OK - {probe.Detail}.");
+            Console.ResetColor();
             var triggerEvaluator = new TriggerEvaluator(
                 config.TriggerTemp, config.PredictiveFloor, config.LookaheadSeconds);
 
@@ -274,8 +356,20 @@ namespace GpuThermalController
                 // Small delay to let dashboard initialize
                 Thread.Sleep(500);
 
-                // Then start the controller
-                controller.RunAsync(cancellationTokenSource.Token).Wait();
+                // Then start the controller. The loop is fault-isolated internally, but
+                // guard here too so any escapee is crash-logged instead of killing the app.
+                try
+                {
+                    controller.RunAsync(cancellationTokenSource.Token).Wait();
+                }
+                catch (Exception ex)
+                {
+                    CrashLogger.Log(ex, "Control loop task fault");
+                    Console.ForegroundColor = ConsoleColor.Red;
+                    Console.WriteLine($"The control loop stopped due to an error: {ex.Message}");
+                    Console.WriteLine($"Details written to {CrashLogger.LogFilePath}");
+                    Console.ResetColor();
+                }
             }
              finally
              {

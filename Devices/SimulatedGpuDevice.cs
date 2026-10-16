@@ -108,6 +108,20 @@ namespace GpuPowerControl.Devices
             return true;
         }
 
+        /// <summary>
+        /// The simulated device always accepts power limit changes. Runs the same
+        /// set/restore round-trip so the startup check path is exercised in simulation.
+        /// </summary>
+        public PowerProbeResult ProbePowerControl()
+        {
+            int restoreW = _currentPowerLimit;
+            int probeW = PowerProbePlanner.ChooseProbeTarget(restoreW, _minPower, _maxPower, 5);
+            SetPowerLimit(probeW, out _);
+            SetPowerLimit(restoreW, out _);
+            return PowerProbeResult.Success(
+                $"confirmed on {Name} (simulated: set {probeW}W, restored to {restoreW}W)");
+        }
+
         private double CalculateTemperature()
         {
             DateTime now = DateTime.UtcNow;

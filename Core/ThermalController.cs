@@ -2,6 +2,7 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 using GpuPowerControl.Devices;
+using GpuThermalController.Dashboard;
 using GpuThermalController.Notifications;
 
 namespace GpuThermalController.Core
@@ -29,12 +30,23 @@ namespace GpuThermalController.Core
         private DateTimeOffset _lastPowerChangeTime;
         private CancellationTokenSource? _cts;
 
+        // Operating power envelope: configured limits clamped to the hardware range.
+        // Emergency safety always uses the raw hardware minimum (see Step emergency path).
+        private readonly int _maxPower;
+        private readonly int _minPower;
+
+        /// <summary>Set when the control loop stopped due to an unexpected error.</summary>
+        private volatile bool _faulted;
+
         // Emergency recovery state
         private DateTimeOffset _emergencyHoldUntil = DateTimeOffset.MinValue;
         private bool _isEmergencyRecovering;
 
         public bool IsControlling => _isControlling;
         public int CurrentPowerLimit => _currentPowerLimit;
+        public int MaxPower => _maxPower;
+        public int MinPower => _minPower;
+        public bool Faulted => _faulted;
         public double LastKnownGoodTemp => _lastKnownGoodTemp;
         public PidController PidController => _pidController;
         public ThermalControllerConfig Config => _config;
@@ -60,8 +72,10 @@ namespace GpuThermalController.Core
             _pidController = pidController;
             _triggerEvaluator = triggerEvaluator;
             _config = config;
+            _maxPower = config.EffectiveMaxPower(device.MaxPower);
+            _minPower = config.EffectiveMinPower(device.MinPower, device.MaxPower);
             _lastKnownGoodTemp = config.TargetTemp;
-            _currentPowerLimit = device.MaxPower;
+            _currentPowerLimit = _maxPower;
             _consecutiveReadFailures = 0;
             _pidCycles = 0;
             _stateTransitions = 0;
@@ -246,7 +260,7 @@ namespace GpuThermalController.Core
 
                 // Exit condition: check EVERY step (even when PID output == current power)
                 // Otherwise once power reaches max, PID outputs max too, and exit is never reached
-                if (currentTemp <= _config.TargetTemp - _config.ExitHysteresis && _currentPowerLimit >= _device.MaxPower)
+                if (currentTemp <= _config.TargetTemp - _config.ExitHysteresis && _currentPowerLimit >= _maxPower)
                 {
                     _isControlling = false;
                     _isEmergencyRecovering = false;
@@ -273,10 +287,81 @@ namespace GpuThermalController.Core
         {
             while (!token.IsCancellationRequested)
             {
-                Step();
+                try
+                {
+                    Step();
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    // Fault isolation: an unexpected error inside the control loop must never
+                    // kill the process. Log it, restore power, and stop the loop gracefully.
+                    _faulted = true;
+                    SafeReportFault(ex);
+                    SafeRestorePower();
+                    break;
+                }
 
                 int sleepMs = _isControlling ? _config.ControllingSleepMs : _config.IdleSleepMs;
-                Thread.Sleep(sleepMs);
+                try
+                {
+                    Thread.Sleep(sleepMs);
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Reports a control-loop fault through every available channel. Each step is
+        /// individually guarded so reporting itself can never throw.
+        /// </summary>
+        private void SafeReportFault(Exception ex)
+        {
+            try
+            {
+                CrashLogger.Log(ex, "Thermal control loop fault");
+            }
+            catch { }
+
+            try
+            {
+                ErrorConsole.Error($"Thermal control loop fault: {ex.Message}");
+            }
+            catch { }
+
+            try
+            {
+                RaiseEvent(_lastKnownGoodTemp, _currentPowerLimit, _isControlling,
+                    ControllerEventType.Warning,
+                    $"[FAULT] Control loop stopped after error: {ex.Message}. Details in crash-log.txt.");
+            }
+            catch { }
+
+            try
+            {
+                ToastNotificationService.ShowErrorToast(
+                    "GpuPowerControl Fault",
+                    $"The control loop stopped due to an error: {ex.Message} Details written to crash-log.txt.");
+            }
+            catch { }
+        }
+
+        /// <summary>Best-effort power restore; never throws.</summary>
+        private void SafeRestorePower()
+        {
+            try
+            {
+                RestoreMaxPower();
+            }
+            catch
+            {
+                // Best effort only - the fault is already reported.
             }
         }
 
@@ -327,8 +412,8 @@ namespace GpuThermalController.Core
 
         private void RestoreMaxPower()
         {
-            _device.SetPowerLimit(_device.MaxPower, out _);
-            _currentPowerLimit = _device.MaxPower;
+            _device.SetPowerLimit(_maxPower, out _);
+            _currentPowerLimit = _maxPower;
         }
 
         private void RaiseEvent(double temperature, int powerLimit, bool isControlling, ControllerEventType eventType, string? message)

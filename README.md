@@ -185,13 +185,25 @@ GpuPowerControl uses `ThermalControllerConfig` for all settings. Key parameters:
 | `TriggerTemp` | 80°C | Temperature to activate PID control |
 | `TargetTemp` | 75°C | Target temperature for PID controller |
 | `EmergencyTemp` | 90°C | Critical temperature for emergency power limit |
-| `DefaultMinPower` | 150W | Minimum power limit (emergency) |
-| `DefaultMaxPower` | 600W | Maximum power limit (full power) |
+| `DefaultMinPower` | 150W | Operating power floor for PID control (clamped to the GPU's hardware range) |
+| `DefaultMaxPower` | 600W | Operating maximum power limit: initial limit and the value restored when control disengages (clamped to the GPU's hardware range) |
 | `Kp` | 20.0 | Proportional gain |
 | `Ki` | 0.5 | Integral gain |
 | `Kd` | 2.5 | Derivative gain |
 | `IdleSleepMs` | 1500ms | Sleep interval when idle |
 | `ControllingSleepMs` | 250ms | Sleep interval when controlling |
+
+### Power Limit Resolution
+
+The configured power limits are **clamped to the range reported by the GPU** (NVML) at startup, so desktop-style defaults on a small-GPU laptop can never push the PID controller past what the hardware supports:
+
+- **Operating maximum** = `min(defaultMaxPower, hardware max)` — the initial power limit and the value restored when control disengages.
+- **Operating minimum** = `defaultMinPower` clamped to `[hardware min, operating maximum]` — the floor for normal PID control.
+- **Emergency** — when temperature hits `EmergencyTemp`, power is forced to the GPU's **hardware minimum** (regardless of `defaultMinPower`) so cooling always has maximum headroom.
+
+The startup banner prints both the hardware range and the effective operating range, with a note whenever a configured value is clamped. If `defaultMaxPower` is below the GPU's hardware minimum, the app refuses to start with an actionable error. If `defaultMinPower` ends up at or above the effective maximum (a **zero-width envelope**), the app starts but prints a warning that PID control cannot lower the power limit until `defaultMinPower` is lowered.
+
+If the app ever stops unexpectedly, a full stack trace is written to `crash-log.txt` next to the executable — attach that file when reporting a crash.
 
 ### External Configuration File (`appsettings.json`)
 

@@ -28,5 +28,13 @@ namespace GpuPowerControl.Devices
         /// <param name="errorMessage">Error message if the operation fails.</param>
         /// <returns>True if successful, false otherwise.</returns>
         bool SetPowerLimit(int watts, out string? errorMessage);
+
+        /// <summary>
+        /// Startup capability probe: attempts a small power-limit change, confirms it
+        /// by reading the limit back, and restores the original limit. The program
+        /// refuses to start the control loop when power control is not available, so
+        /// the user is never given false confidence that their GPU is protected.
+        /// </summary>
+        PowerProbeResult ProbePowerControl();
     }
 }

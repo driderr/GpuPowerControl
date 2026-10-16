@@ -44,11 +44,15 @@ public class DashboardDataProvider : IDashboardDataProvider
         _eventCapacity = eventCapacity;
         _startTime = DateTime.UtcNow;
 
+        // Operating power envelope: configured limits clamped to the hardware range
+        int minPower = controllerConfig.EffectiveMinPower(device.MinPower, device.MaxPower);
+        int maxPower = controllerConfig.EffectiveMaxPower(device.MaxPower);
+
         // Build static config once
         _config = new DashboardConfig(
             GpuName: device.Name,
-            MinPower: device.MinPower,
-            MaxPower: device.MaxPower,
+            MinPower: minPower,
+            MaxPower: maxPower,
             TargetTemp: controllerConfig.TargetTemp,
             TriggerTemp: controllerConfig.TriggerTemp,
             EmergencyTemp: controllerConfig.EmergencyTemp,
@@ -62,7 +66,7 @@ public class DashboardDataProvider : IDashboardDataProvider
             Timestamp: DateTime.UtcNow,
             Uptime: TimeSpan.Zero,
             Temperature: controllerConfig.TargetTemp,
-            CurrentPowerLimit: device.MaxPower,
+            CurrentPowerLimit: maxPower,
             IsControlling: false,
             Derivative: 0.0,
             PidCycles: 0,

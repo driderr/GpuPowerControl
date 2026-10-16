@@ -1,4 +1,5 @@
 using GpuThermalController.Core;
+using GpuThermalController.Notifications;
 using GpuPowerControl.Tests.Mocks;
 using Xunit;
 
@@ -1035,5 +1036,120 @@ public class ThermalControllerTests
         controller.Step(50);
         // Now hold has expired, PID should engage
         Assert.True(controller.IsControlling);
+    }
+
+    // === CONFIG POWER ENVELOPE (issue #1: configured limits must be used, clamped to hardware) ===
+
+    private (ThermalController controller, MockGpuDevice device) CreateLaptopController(
+        int defaultMaxPower, int defaultMinPower)
+    {
+        // Laptop GPU: hardware range 1W-95W (Lenovo LOQ / RTX 3050 style)
+        var config = new ThermalControllerConfig
+        {
+            DefaultMaxPower = defaultMaxPower,
+            DefaultMinPower = defaultMinPower
+        };
+        var device = new MockGpuDevice(minPower: 1, maxPower: 95);
+        var pid = new PidController(config.Kp, config.Ki, config.Kd, config.TargetTemp,
+            config.EffectiveMaxPower(device.MaxPower), config.EffectiveMinPower(device.MinPower, device.MaxPower),
+            config.IntegralMax, config.IntegralMin, config.IntegralBand, config.MinimumDt);
+        var trigger = new TriggerEvaluator(config.TriggerTemp, config.PredictiveFloor, config.LookaheadSeconds);
+        var controller = new ThermalController(device, pid, trigger, config);
+        return (controller, device);
+    }
+
+    [Fact]
+    public void Constructor_ConfiguredMaxBelowHardware_InitialPowerIsConfiguredMax()
+    {
+        var (controller, device) = CreateLaptopController(defaultMaxPower: 60, defaultMinPower: 10);
+
+        Assert.Equal(60, controller.CurrentPowerLimit);
+        Assert.Equal(60, controller.MaxPower);
+        Assert.Equal(10, controller.MinPower);
+        Assert.Equal(95, device.MaxPower); // Hardware range untouched
+    }
+
+    [Fact]
+    public void Stop_ConfiguredMaxBelowHardware_RestoresConfiguredMaxNotHardwareMax()
+    {
+        var (controller, device) = CreateLaptopController(defaultMaxPower: 60, defaultMinPower: 10);
+
+        controller.Stop();
+
+        Assert.Equal(60, controller.CurrentPowerLimit);
+        Assert.Equal(60, device.LastPowerLimit);
+    }
+
+    [Fact]
+    public void Step_Emergency_UsesHardwareMinNotConfiguredMin()
+    {
+        // Emergency safety must always be able to drop to the hardware floor,
+        // even when the configured operating minimum is higher.
+        var (controller, device) = CreateLaptopController(defaultMaxPower: 60, defaultMinPower: 40);
+
+        controller.Step(95);
+
+        Assert.Equal(1, controller.CurrentPowerLimit);
+        Assert.Equal(1, device.LastPowerLimit);
+    }
+
+    [Fact]
+    public void Step_ExitCondition_RestoresToConfiguredMax()
+    {
+        var (controller, device) = CreateLaptopController(defaultMaxPower: 60, defaultMinPower: 10);
+
+        var currentTime = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        controller.TimeProvider = () => currentTime;
+
+        // Engage control at 85C - power drops to the operating floor
+        controller.Step(85);
+        Assert.True(controller.IsControlling);
+        Assert.True(controller.CurrentPowerLimit < 60);
+
+        // Cool below target - hysteresis (72C); PID ramps power back toward the
+        // configured max (rate limited to 15W/s, two 2.5s steps reach the 60W ceiling)
+        currentTime = currentTime.AddMilliseconds(2500);
+        controller.Step(69);
+        currentTime = currentTime.AddMilliseconds(2500);
+        controller.Step(69);
+
+        Assert.False(controller.IsControlling);
+        Assert.Equal(60, controller.CurrentPowerLimit);
+        Assert.Equal(60, device.LastPowerLimit);
+    }
+
+    // === FAULT ISOLATION (issue #2: control loop faults must not kill the process) ===
+
+    [Fact]
+    public async Task RunAsync_DeviceThrowsInGetTemperature_FaultsGracefullyWithoutKillingProcess()
+    {
+        // Disable toasts for this test (registry + toast creation is a machine side effect)
+        ToastNotificationService.SetConfig(new NotificationConfig { Enabled = false });
+
+        var config = new ThermalControllerConfig { IdleSleepMs = 50 };
+        var device = new MockGpuDevice(minPower: 1, maxPower: 95);
+        device.GetTemperatureShouldThrow = true;
+        var pid = new PidController(config.Kp, config.Ki, config.Kd, config.TargetTemp,
+            config.EffectiveMaxPower(device.MaxPower), config.EffectiveMinPower(device.MinPower, device.MaxPower),
+            config.IntegralMax, config.IntegralMin, config.IntegralBand, config.MinimumDt);
+        var trigger = new TriggerEvaluator(config.TriggerTemp, config.PredictiveFloor, config.LookaheadSeconds);
+        var controller = new ThermalController(device, pid, trigger, config);
+
+        var events = new List<ThermalControllerEventArgs>();
+        controller.OnStateChange += (_, e) => events.Add(e);
+
+        using var cts = new CancellationTokenSource();
+        Task runTask = controller.RunAsync(cts.Token);
+
+        // MainLoop must catch the driver-level exception, report a fault, and stop
+        // (the task completes instead of faulting and taking the process down).
+        var completed = await Task.WhenAny(runTask, Task.Delay(TimeSpan.FromSeconds(5)));
+        Assert.True(ReferenceEquals(runTask, completed),
+            "Control loop task should complete after a fault");
+        await runTask;
+        Assert.True(controller.Faulted);
+        Assert.Contains(events, e => e.EventType == ControllerEventType.Warning);
+
+        cts.Cancel();
     }
 }

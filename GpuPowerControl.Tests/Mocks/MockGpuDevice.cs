@@ -26,6 +26,12 @@ public class MockGpuDevice : IGpuDevice
     /// <summary>When true, GetTemperature returns false (simulates device read failure).</summary>
     public bool GetTemperatureShouldFail { get; set; }
 
+    /// <summary>When true, GetTemperature throws (simulates a driver-level P/Invoke failure).</summary>
+    public bool GetTemperatureShouldThrow { get; set; }
+
+    /// <summary>Result returned by ProbePowerControl (default: success).</summary>
+    public PowerProbeResult ProbeResult { get; set; } = PowerProbeResult.Success("Mock: power control available");
+
     public MockGpuDevice(
         string name = "Mock GPU",
         int minPower = 150,
@@ -73,6 +79,9 @@ public class MockGpuDevice : IGpuDevice
 
     public bool GetTemperature(out double temperature)
     {
+        if (GetTemperatureShouldThrow)
+            throw new Exception("Simulated NVML P/Invoke failure");
+
         if (GetTemperatureShouldFail)
         {
             temperature = 0;
@@ -100,6 +109,9 @@ public class MockGpuDevice : IGpuDevice
         errorMessage = null;
         return true;
     }
+
+    public PowerProbeResult ProbePowerControl()
+        => ProbeResult;
 
     /// <summary>Clear the recorded power limit calls.</summary>
     public void ClearPowerLimitCalls()

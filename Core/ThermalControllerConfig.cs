@@ -48,6 +48,30 @@ public class ThermalControllerConfig
     public int DefaultMaxPower { get; set; } = 600;
     public int DefaultMinPower { get; set; } = 150;
 
+    /// <summary>
+    /// Operating maximum power in watts: the configured <see cref="DefaultMaxPower"/> clamped
+    /// so it never exceeds the hardware maximum reported by NVML.
+    /// This is the initial power limit and the value restored when control disengages.
+    /// </summary>
+    public int EffectiveMaxPower(int hardwareMaxPower)
+        => Math.Min(DefaultMaxPower, hardwareMaxPower);
+
+    /// <summary>
+    /// Operating minimum power in watts: the configured <see cref="DefaultMinPower"/> clamped
+    /// to the valid operating range [hardware minimum, effective maximum].
+    /// Used as the PID operating floor. Emergency safety always uses the raw hardware minimum.
+    /// If the effective maximum is below the hardware floor (degenerate envelope), returns
+    /// the effective maximum so the envelope stays consistent; Program.cs detects that
+    /// configuration and refuses to start with an actionable message.
+    /// </summary>
+    public int EffectiveMinPower(int hardwareMinPower, int hardwareMaxPower)
+    {
+        int max = EffectiveMaxPower(hardwareMaxPower);
+        if (max < hardwareMinPower)
+            return max;
+        return Math.Clamp(DefaultMinPower, hardwareMinPower, max);
+    }
+
     // Power adjustment gating
     public int MinPowerDeltaFarW { get; set; } = 10;
     public int MinPowerDeltaNearW { get; set; } = 3;

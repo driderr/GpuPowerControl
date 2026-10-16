@@ -480,6 +480,55 @@ public class ThermalControllerConfigTests
         Assert.Equal(75u, config.TargetTemp);
     }
 
+    // === POWER ENVELOPE (configured limits clamped to hardware range, issue #1) ===
+
+    [Fact]
+    public void EffectiveMaxPower_ConfiguredBelowHardware_ReturnsConfigured()
+    {
+        var config = new ThermalControllerConfig { DefaultMaxPower = 60 };
+        Assert.Equal(60, config.EffectiveMaxPower(95));
+    }
+
+    [Fact]
+    public void EffectiveMaxPower_ConfiguredAboveHardware_ReturnsHardwareMax()
+    {
+        var config = new ThermalControllerConfig { DefaultMaxPower = 600 };
+        Assert.Equal(95, config.EffectiveMaxPower(95));
+    }
+
+    [Fact]
+    public void EffectiveMinPower_WithinRange_ReturnsConfigured()
+    {
+        var config = new ThermalControllerConfig { DefaultMaxPower = 95, DefaultMinPower = 20 };
+        Assert.Equal(20, config.EffectiveMinPower(1, 95));
+    }
+
+    [Fact]
+    public void EffectiveMinPower_BelowHardwareMin_ClampedToHardwareMin()
+    {
+        var config = new ThermalControllerConfig { DefaultMaxPower = 95, DefaultMinPower = 0 };
+        Assert.Equal(1, config.EffectiveMinPower(1, 95));
+    }
+
+    [Fact]
+    public void EffectiveMinPower_AboveEffectiveMax_ClampedToEffectiveMax()
+    {
+        // Laptop GPU: 1W-95W hardware, desktop-style config (60W max / 150W min)
+        var config = new ThermalControllerConfig { DefaultMaxPower = 60, DefaultMinPower = 150 };
+        Assert.Equal(60, config.EffectiveMinPower(1, 95));
+    }
+
+    [Fact]
+    public void EffectiveMinPower_ConfigMaxBelowHardwareMin_YieldsConsistentDegenerateEnvelope()
+    {
+        // Pathological config: 60W max on a GPU whose hardware floor is 150W.
+        // The helpers must not throw; the envelope collapses to min == max == 60,
+        // which Program.cs detects (maxPower < device.MinPower) and refuses to start.
+        var config = new ThermalControllerConfig { DefaultMaxPower = 60, DefaultMinPower = 50 };
+        Assert.Equal(60, config.EffectiveMaxPower(600));
+        Assert.Equal(60, config.EffectiveMinPower(150, 600));
+    }
+
     // === EDGE CASES ===
 
     [Fact]
