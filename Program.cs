@@ -38,6 +38,7 @@ namespace GpuThermalController
             int? baseTempArg = null;
             int? peakTempArg = null;
             int? seedArg = null;
+            string? probeFailureArg = null;
 
             for (int i = 0; i < args.Length; i++)
             {
@@ -60,6 +61,17 @@ namespace GpuThermalController
                         break;
                     case "--no-notifications":
                         disableNotifications = true;
+                        break;
+                    case "--probe-failure":
+                        // Test hook: force the startup power-control check to fail on any
+                        // machine so the failure banner can be demonstrated. Optional value:
+                        // not-supported | not-permitted | exception. No GPU writes happen.
+                        probeFailureArg = string.Empty;
+                        if (i + 1 < args.Length && !args[i + 1].StartsWith("--"))
+                            probeFailureArg = args[i + 1];
+                        break;
+                    case string probeFailureEquals when probeFailureEquals.StartsWith("--probe-failure="):
+                        probeFailureArg = probeFailureEquals["--probe-failure=".Length..];
                         break;
                     case "--test-error":
                         ErrorConsole.Error("This is a test error message");
@@ -160,9 +172,15 @@ namespace GpuThermalController
             if (minPower != config.DefaultMinPower)
                 Console.WriteLine($"Note: defaultMinPower ({config.DefaultMinPower}W) clamped to {minPower}W to fit the hardware range.");
             if (minPower >= maxPower)
-                Console.WriteLine($"Warning: zero-width operating envelope ({minPower}W - {maxPower}W): defaultMinPower " +
+            {
+                string zeroWidthWarning = $"zero-width operating envelope ({minPower}W - {maxPower}W): defaultMinPower " +
                     $"({config.DefaultMinPower}W) is at or above this GPU's effective maximum ({maxPower}W), so PID control " +
-                    $"cannot lower the power limit at all. Lower defaultMinPower in appsettings.json to enable control.");
+                    "cannot lower the power limit at all. Lower defaultMinPower in appsettings.json to enable control.";
+                Console.WriteLine($"Warning: {zeroWidthWarning}");
+                // The dashboard Live display wipes everything printed before it starts,
+                // so the same warning is also queued for the dashboard Event Log.
+                ErrorConsole.Warning(zeroWidthWarning);
+            }
 
             // Single exit path for post-init startup failures: NVML is shut down exactly
             // once and the process exits non-zero (ExitCode rather than Exit() so a
@@ -204,11 +222,15 @@ namespace GpuThermalController
                 if (envelopeWidth > 0 && firstCycleCut >= envelopeWidth)
                 {
                     double suggestedKp = Math.Round(envelopeWidth / (double)(config.TriggerTemp - config.TargetTemp), 1);
-                    Console.ForegroundColor = ConsoleColor.Yellow;
-                    Console.WriteLine($"Warning: with Kp={config.Kp} the first PID cycle will drive power to the " +
+                    string kpAdvisory = $"with Kp={config.Kp} the first PID cycle will drive power to the " +
                         $"{minPower}W floor (Kp x {config.TriggerTemp - config.TargetTemp}C = {firstCycleCut:F0}W on a " +
-                        $"{envelopeWidth}W envelope). Consider lowering Kp to ~{suggestedKp} for smoother control.");
+                        $"{envelopeWidth}W envelope). Consider lowering Kp to ~{suggestedKp} for smoother control.";
+                    Console.ForegroundColor = ConsoleColor.Yellow;
+                    Console.WriteLine($"Warning: {kpAdvisory}");
                     Console.ResetColor();
+                    // Also queue it for the dashboard Event Log - the console line above
+                    // is wiped once the Live display takes over the terminal.
+                    ErrorConsole.Warning(kpAdvisory);
                 }
             }
 
@@ -219,7 +241,17 @@ namespace GpuThermalController
             PowerProbeResult probe;
             try
             {
-                probe = device.ProbePowerControl();
+                if (probeFailureArg is not null && probeFailureArg.Equals("exception", StringComparison.OrdinalIgnoreCase))
+                {
+                    // Test hook: exercise the exception path below without touching the GPU.
+                    throw new InvalidOperationException("simulated probe fault (--probe-failure=exception)");
+                }
+                probe = probeFailureArg is null
+                    ? device.ProbePowerControl()
+                    : // Test hook: synthesize a driver-style failure on any machine.
+                      // Deliberately runs INSTEAD of the real probe so no power limit
+                      // is ever written (see BuildForcedProbeFailureDetail).
+                      PowerProbeResult.Failure(BuildForcedProbeFailureDetail(probeFailureArg));
             }
             catch (Exception ex)
             {
@@ -250,6 +282,10 @@ namespace GpuThermalController
             Console.ForegroundColor = ConsoleColor.Green;
             Console.WriteLine($"Power control check: OK - {probe.Detail}.");
             Console.ResetColor();
+            // The console line above is wiped once the Live display takes over the
+            // terminal, so the same result is queued for the dashboard Event Log and
+            // the verified flag is baked into the dashboard's power row.
+            ErrorConsole.Info($"Power control check: OK - {probe.Detail}.");
             var triggerEvaluator = new TriggerEvaluator(
                 config.TriggerTemp, config.PredictiveFloor, config.LookaheadSeconds);
 
@@ -257,8 +293,10 @@ namespace GpuThermalController
 
             // === DASHBOARD WIRING ===
 
-            // 1. Create the data provider (collects metrics from controller via events)
-            var dataProvider = new DashboardDataProvider(device, config);
+            // 1. Create the data provider (collects metrics from controller via events).
+            // The probe result is passed in so the dashboard can persistently show
+            // power control as verified (pre-dashboard console lines get wiped).
+            var dataProvider = new DashboardDataProvider(device, config, powerProbe: probe);
             dataProvider.Subscribe(controller);
 
             // 2. Create the console dashboard (renders to terminal)
@@ -473,6 +511,30 @@ namespace GpuThermalController
             int gpuIndex = selectedIndex - 1;
             Console.WriteLine($"Selected: {gpus[gpuIndex].name}");
             return gpus[gpuIndex].device!;
+        }
+
+        /// <summary>
+        /// Builds the banner detail for a forced probe failure (--probe-failure). Mirrors
+        /// the real NvmlGpuDevice failure format (driver error text +
+        /// PowerProbePlanner.FailureHint) so the demoed banner is identical to what an
+        /// unsupported GPU produces. The real probe is skipped when this is used, so no
+        /// power limit is ever written.
+        /// </summary>
+        internal static string BuildForcedProbeFailureDetail(string? forcedKind)
+        {
+            const string tail = " This GPU cannot be power-limited, so thermal protection is not possible on this machine.";
+            const string forced = " (This failure was forced by --probe-failure for testing.)";
+            string? errorText = forcedKind?.Trim().ToLowerInvariant() switch
+            {
+                "not-supported" or "not_supported" => "Not Supported",
+                "not-permitted" or "not_permitted" => "Not Permitted",
+                null or "" => null,
+                _ => forcedKind.Trim()
+            };
+            if (errorText is null)
+                return "The driver rejected the test power limit change." + tail + forced;
+            return $"The driver rejected the test power limit change: {errorText}." +
+                PowerProbePlanner.FailureHint(errorText) + tail + forced;
         }
 
         static bool IsAdministrator()

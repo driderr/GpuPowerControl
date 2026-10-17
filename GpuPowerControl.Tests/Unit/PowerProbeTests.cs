@@ -1,5 +1,6 @@
 using GpuPowerControl.Devices;
 using GpuPowerControl.Tests.Mocks;
+using GpuThermalController;
 using Xunit;
 
 namespace GpuPowerControl.Tests
@@ -80,6 +81,55 @@ namespace GpuPowerControl.Tests
             Assert.Equal(2, gpu.PowerLimitCalls.Count);
             Assert.Equal(595, gpu.PowerLimitCalls[0]);
             Assert.Equal(600, gpu.PowerLimitCalls.Last());
+        }
+    }
+
+    /// <summary>
+    /// Verifies the forced probe-failure detail text used by --probe-failure. It must
+    /// mirror the real NvmlGpuDevice failure format so the demoed banner is identical
+    /// to what an unsupported GPU produces.
+    /// </summary>
+    public class ForcedProbeFailureDetailTests
+    {
+        [Fact]
+        public void NotSupported_MirrorsDriverTextAndFirmwareHint()
+        {
+            string detail = Program.BuildForcedProbeFailureDetail("not-supported");
+
+            Assert.Contains("Not Supported", detail);
+            Assert.Contains("Dynamic Boost", detail);
+            Assert.Contains("thermal protection is not possible", detail);
+            Assert.Contains("--probe-failure", detail);
+        }
+
+        [Fact]
+        public void NotPermitted_MirrorsDriverTextAndAdminHint()
+        {
+            string detail = Program.BuildForcedProbeFailureDetail("not-permitted");
+
+            Assert.Contains("Not Permitted", detail);
+            Assert.Contains("Administrator", detail);
+            Assert.Contains("--probe-failure", detail);
+        }
+
+        [Fact]
+        public void Kind_Matching_IsCaseInsensitive()
+        {
+            Assert.Contains("Not Supported", Program.BuildForcedProbeFailureDetail("NOT-SUPPORTED"));
+            Assert.Contains("Not Permitted", Program.BuildForcedProbeFailureDetail("Not_Permitted"));
+        }
+
+        [Theory]
+        [InlineData(null)]
+        [InlineData("")]
+        [InlineData("some-unknown-driver-text")]
+        public void UnknownOrEmpty_Kind_ProducesGenericDetail(string? kind)
+        {
+            string detail = Program.BuildForcedProbeFailureDetail(kind);
+
+            Assert.StartsWith("The driver rejected the test power limit change", detail);
+            Assert.Contains("thermal protection is not possible", detail);
+            Assert.Contains("--probe-failure", detail);
         }
     }
 }

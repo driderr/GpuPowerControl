@@ -59,6 +59,20 @@ public static class ErrorConsole
     }
 
     /// <summary>
+    /// Writes an informational message with a green icon and bold prefix.
+    /// Also queues the entry for the dashboard to render (e.g. the startup
+    /// power-control check result, which would otherwise be wiped by the
+    /// Live display after being printed to the console).
+    /// </summary>
+    public static void Info(string message)
+    {
+        var entry = new ErrorEntry("INFO", message);
+        _pending.Enqueue(entry);
+        TrimPending();
+        CreateConsole().MarkupLine($"[bold green]\u2139 INFO:[/] {message}");
+    }
+
+    /// <summary>
     /// Drains all pending error/warning entries from the queue.
     /// Called by the dashboard during each render frame.
     /// </summary>

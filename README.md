@@ -155,6 +155,24 @@ dotnet run --simulate --scenario GradualWarmup
 dotnet run --simulate --scenario Default --base-temp 40 --peak-temp 85 --seed 42
 ```
 
+### Diagnostics
+
+```bash
+# Force the startup power-control check to fail, to demonstrate the failure banner
+# on any machine (no real power limit is ever written). Values: not-supported
+# (firmware-owned budget), not-permitted (run as admin), exception (probe throws).
+GpuPowerControl.exe --probe-failure
+GpuPowerControl.exe --probe-failure not-supported
+GpuPowerControl.exe --probe-failure=not-permitted
+GpuPowerControl.exe --simulate --probe-failure exception
+
+# Post a test error/warning to the dashboard Event Log
+GpuPowerControl.exe --test-error
+
+# Disable Windows toast notifications
+GpuPowerControl.exe --no-notifications
+```
+
 ### Simulation Scenarios
 
 | Scenario | Description | Peak Temp |

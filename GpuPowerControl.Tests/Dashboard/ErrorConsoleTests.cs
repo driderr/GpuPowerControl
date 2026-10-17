@@ -130,6 +130,61 @@ public class ErrorConsoleTests
     }
 
     [Fact]
+    public void Info_WritesToStderr()
+    {
+        // Arrange
+        var original = Console.Error;
+        var stringWriter = new StringWriter();
+        Console.SetError(stringWriter);
+
+        try
+        {
+            // Act
+            ErrorConsole.Info("test info message");
+
+            // Assert
+            string output = stringWriter.ToString();
+            Assert.Contains("INFO", output);
+            Assert.Contains("test info message", output);
+        }
+        finally
+        {
+            // Cleanup
+            stringWriter.Dispose();
+            Console.SetError(original);
+        }
+    }
+
+    [Fact]
+    public void Info_QueueAndDrain_Works()
+    {
+        // Arrange
+        var original = Console.Error;
+        var stringWriter = new StringWriter();
+        Console.SetError(stringWriter);
+
+        try
+        {
+            ErrorConsole.DrainPending();
+
+            // Act
+            ErrorConsole.Info("queued info");
+
+            // Assert
+            var drained = ErrorConsole.DrainPending();
+            Assert.Single(drained);
+            Assert.Equal("INFO", drained[0].Level);
+            Assert.Equal("queued info", drained[0].Message);
+        }
+        finally
+        {
+            stringWriter.Dispose();
+            Console.SetError(original);
+            ErrorConsole.DrainPending();
+        }
+    }
+
+    [Fact]
     public void ErrorEntry_HasTimestamp()
     {
         // Arrange

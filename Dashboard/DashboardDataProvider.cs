@@ -36,7 +36,8 @@ public class DashboardDataProvider : IDashboardDataProvider
         IGpuDevice device,
         ThermalControllerConfig controllerConfig,
         int historyCapacity = 2400,
-        int eventCapacity = 500)
+        int eventCapacity = 500,
+        PowerProbeResult? powerProbe = null)
     {
         _device = device;
         _controllerConfig = controllerConfig;
@@ -48,7 +49,9 @@ public class DashboardDataProvider : IDashboardDataProvider
         int minPower = controllerConfig.EffectiveMinPower(device.MinPower, device.MaxPower);
         int maxPower = controllerConfig.EffectiveMaxPower(device.MaxPower);
 
-        // Build static config once
+        // Build static config once. The startup probe result (if available) is baked
+        // in so the dashboard can show power control as verified - the console line
+        // printed before the dashboard starts would be wiped by the Live display.
         _config = new DashboardConfig(
             GpuName: device.Name,
             MinPower: minPower,
@@ -58,7 +61,10 @@ public class DashboardDataProvider : IDashboardDataProvider
             EmergencyTemp: controllerConfig.EmergencyTemp,
             Kp: controllerConfig.Kp,
             Ki: controllerConfig.Ki,
-            Kd: controllerConfig.Kd
+            Kd: controllerConfig.Kd,
+            HwMinPower: device.MinPower,
+            HwMaxPower: device.MaxPower,
+            PowerControlVerified: powerProbe?.CanControlPower ?? false
         );
 
         // Initial empty snapshot

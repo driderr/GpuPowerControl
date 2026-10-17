@@ -1,3 +1,4 @@
+using GpuPowerControl.Devices;
 using GpuPowerControl.Tests.Mocks;
 using GpuThermalController.Core;
 using GpuThermalController.Dashboard;
@@ -440,5 +441,37 @@ public class DashboardDataProviderTests
         controller.Step(60);
 
         Assert.True(provider.Current.Uptime.TotalMilliseconds >= 0);
+    }
+
+    [Fact]
+    public void Ctor_WithSuccessfulProbe_SetsPowerControlVerified()
+    {
+        var device = CreateDevice();
+        var probe = PowerProbeResult.Success("confirmed on Test GPU (set 595W, read back 595W, restored to 600W)");
+        var provider = new DashboardDataProvider(device, CreateConfig(), powerProbe: probe);
+
+        Assert.True(provider.Config.PowerControlVerified);
+        Assert.Equal(150, provider.Config.HwMinPower);
+        Assert.Equal(600, provider.Config.HwMaxPower);
+    }
+
+    [Fact]
+    public void Ctor_WithFailedProbe_SetsPowerControlUnverified()
+    {
+        var device = CreateDevice();
+        var probe = PowerProbeResult.Failure("The driver rejected the test power limit change: Not Supported.");
+        var provider = new DashboardDataProvider(device, CreateConfig(), powerProbe: probe);
+
+        Assert.False(provider.Config.PowerControlVerified);
+    }
+
+    [Fact]
+    public void Ctor_WithoutProbe_DefaultsToUnverified_WithHardwareRange()
+    {
+        var provider = new DashboardDataProvider(CreateDevice(), CreateConfig());
+
+        Assert.False(provider.Config.PowerControlVerified);
+        Assert.Equal(150, provider.Config.HwMinPower);
+        Assert.Equal(600, provider.Config.HwMaxPower);
     }
 }

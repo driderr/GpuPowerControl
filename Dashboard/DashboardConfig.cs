@@ -13,5 +13,8 @@ public record DashboardConfig(
     uint EmergencyTemp,
     double Kp,
     double Ki,
-    double Kd
+    double Kd,
+    int HwMinPower = 0,
+    int HwMaxPower = 0,
+    bool PowerControlVerified = false
 );

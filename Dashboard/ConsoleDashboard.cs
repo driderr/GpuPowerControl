@@ -191,7 +191,8 @@ public class ConsoleDashboard : IDisposable
         // === POWER BAR ===
         _dashboardTable.AddRow(sBlankLine, sBlankLine);
         _dashboardTable.AddRow(
-            new Markup($"Power: [bold]{current.CurrentPowerLimit}W[/]  |  Range: {config.MinPower}W - {config.MaxPower}W"),
+            new Markup($"Power: [bold]{current.CurrentPowerLimit}W[/]  |  Range: {config.MinPower}W - {config.MaxPower}W  |  Power control: " +
+                (config.PowerControlVerified ? "[green]verified[/]" : "[red]unverified[/]")),
             sBlankLine);
         _dashboardTable.AddRow(CreatePowerBar(current, config), sBlankLine);
 
@@ -252,6 +253,8 @@ public class ConsoleDashboard : IDisposable
             _configTable.AddRow("Trigger", $"{config.TriggerTemp}C");
             _configTable.AddRow("Emergency", $"{config.EmergencyTemp}C");
             _configTable.AddRow("Power Range", $"{config.MinPower}W - {config.MaxPower}W");
+            if (config.HwMaxPower > 0)
+                _configTable.AddRow("Power Range (hw)", $"{config.HwMinPower}W - {config.HwMaxPower}W");
             items.Add(_configTable);
         }
 
@@ -364,9 +367,10 @@ public class ConsoleDashboard : IDisposable
             {
                 "ERROR" => "red",
                 "WARN" => "yellow",
+                "INFO" => "green",
                 _ => "gray"
             };
-            var icon = err.Level switch { "ERROR" => "\u2715", "WARN" => "\u26A0", _ => "?" };
+            var icon = err.Level switch { "ERROR" => "\u2715", "WARN" => "\u26A0", "INFO" => "\u2139", _ => "?" };
             allEntries.Add(new LogLine(err.Timestamp, colorName, $"{icon} {err.Level}: {Markup.Escape(err.Message)}"));
         }
 
