@@ -163,8 +163,8 @@ namespace GpuThermalController
             Console.WriteLine($"Started Thermal Controller.");
             Console.WriteLine($"Device: {device.Name}");
             Console.WriteLine($"Trigger: {config.TriggerTemp}C | Target Stability: {config.TargetTemp}C | Emergency Limit: {config.EmergencyTemp}C");
-            Console.WriteLine($"Power Range (hardware): {device.MinPower}W - {device.MaxPower}W");
-            Console.WriteLine($"Power Range (operating): {minPower}W - {maxPower}W");
+            Console.WriteLine($"Power Limit Range (hardware): {device.MinPower}W - {device.MaxPower}W");
+            Console.WriteLine($"Power Limit Range (operating): {minPower}W - {maxPower}W");
             Console.ResetColor();
 
             if (maxPower != config.DefaultMaxPower)
@@ -280,12 +280,12 @@ namespace GpuThermalController
                 return;
             }
             Console.ForegroundColor = ConsoleColor.Green;
-            Console.WriteLine($"Power control check: OK - {probe.Detail}.");
+            Console.WriteLine("Power control check: OK.");
             Console.ResetColor();
-            // The console line above is wiped once the Live display takes over the
-            // terminal, so the same result is queued for the dashboard Event Log and
-            // the verified flag is baked into the dashboard's power row.
-            ErrorConsole.Info($"Power control check: OK - {probe.Detail}.");
+            // The pre-dashboard console text can stay visible above the Live frame,
+            // so keep this short. The same confirmation is queued for the dashboard
+            // Event Log, and the verified flag is baked into the dashboard's power row.
+            ErrorConsole.Info("Power control check: OK");
             var triggerEvaluator = new TriggerEvaluator(
                 config.TriggerTemp, config.PredictiveFloor, config.LookaheadSeconds);
 

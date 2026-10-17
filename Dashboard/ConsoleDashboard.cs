@@ -174,7 +174,7 @@ public class ConsoleDashboard : IDisposable
             BorderStyle = new Style(stateColor),
             Border = BoxBorder.Rounded
         };
-        var powerPanel = new Panel(new Text($"{current.CurrentPowerLimit}W / {config.MaxPower}W"))
+        var powerPanel = new Panel(new Text($"Limit: {current.CurrentPowerLimit}W / {config.MaxPower}W"))
         {
             BorderStyle = sStyleYellow,
             Border = BoxBorder.Rounded
@@ -191,7 +191,7 @@ public class ConsoleDashboard : IDisposable
         // === POWER BAR ===
         _dashboardTable.AddRow(sBlankLine, sBlankLine);
         _dashboardTable.AddRow(
-            new Markup($"Power: [bold]{current.CurrentPowerLimit}W[/]  |  Range: {config.MinPower}W - {config.MaxPower}W  |  Power control: " +
+            new Markup($"Power Limit: [bold]{current.CurrentPowerLimit}W[/]  |  Range: {config.MinPower}W - {config.MaxPower}W  |  Power control: " +
                 (config.PowerControlVerified ? "[green]verified[/]" : "[red]unverified[/]")),
             sBlankLine);
         _dashboardTable.AddRow(CreatePowerBar(current, config), sBlankLine);
@@ -252,9 +252,9 @@ public class ConsoleDashboard : IDisposable
             _configTable.AddRow("Target", $"{config.TargetTemp}C");
             _configTable.AddRow("Trigger", $"{config.TriggerTemp}C");
             _configTable.AddRow("Emergency", $"{config.EmergencyTemp}C");
-            _configTable.AddRow("Power Range", $"{config.MinPower}W - {config.MaxPower}W");
+            _configTable.AddRow("Power Limit Range", $"{config.MinPower}W - {config.MaxPower}W");
             if (config.HwMaxPower > 0)
-                _configTable.AddRow("Power Range (hw)", $"{config.HwMinPower}W - {config.HwMaxPower}W");
+                _configTable.AddRow("Power Limit Range (hw)", $"{config.HwMinPower}W - {config.HwMaxPower}W");
             items.Add(_configTable);
         }
 
@@ -308,7 +308,7 @@ public class ConsoleDashboard : IDisposable
             new Markup("[bold]Temperature History[/]"),
             tempChart,
             sBlankLine,
-            new Markup("[bold]Power History[/]"),
+            new Markup("[bold]Power Limit History[/]"),
             powerChart);
     }
 
